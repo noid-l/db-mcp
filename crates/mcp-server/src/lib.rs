@@ -89,23 +89,26 @@ pub struct PromptContent {
 }
 
 pub struct McpServer {
-    config: crate::config::Config,
-    registry: Arc<crate::db::DataSourceRegistry>,
-    sql_validator: crate::security::SqlValidator,
+    config: db_core::config::Config,
+    registry: Arc<db_core::db::DataSourceRegistry>,
+    sql_validator: db_core::security::SqlValidator,
+    metadata_store: Option<Arc<db_core::metadata::MetadataStore>>,
 }
 
 impl McpServer {
     pub fn new(
-        config: crate::config::Config,
-        registry: Arc<crate::db::DataSourceRegistry>,
+        config: db_core::config::Config,
+        registry: Arc<db_core::db::DataSourceRegistry>,
+        metadata_store: Option<Arc<db_core::metadata::MetadataStore>>,
     ) -> Self {
         let security_cfg = config.mcp.security.clone();
         let sql_validator =
-            crate::security::SqlValidator::new(security_cfg.allowed_prefixes.clone());
+            db_core::security::SqlValidator::new(security_cfg.allowed_prefixes.clone());
         Self {
             config,
             registry,
             sql_validator,
+            metadata_store,
         }
     }
 
@@ -211,7 +214,7 @@ impl McpServer {
 
     async fn execute_and_audit(
         &self,
-        conn: &crate::db::BaseConnector,
+        conn: &db_core::db::BaseConnector,
         ds: &str,
         sql: &str,
         limit: usize,
@@ -446,6 +449,25 @@ impl McpServer {
                     required: vec!["name".to_string()],
                 },
             },
+            Tool {
+                name: "refresh_schema".to_string(),
+                description: "强制刷新指定数据源的本地 Schema 缓存（包括表结构和字段信息），使本地缓存与目标数据库保持同步。".to_string(),
+                input_schema: self.datasource_only_schema(),
+            },
+            Tool {
+                name: "search_schema".to_string(),
+                description: "在指定数据源的本地 Schema 缓存中，通过关键词模糊搜索匹配的表名、列名以及注释，快速定位包含敏感信息或关联业务的表和列。".to_string(),
+                input_schema: InputSchema {
+                    schema_type: "object".to_string(),
+                    properties: {
+                        let mut map = HashMap::new();
+                        map.insert("dataSource".to_string(), Property { prop_type: "string".to_string(), description: "数据源名称".to_string() });
+                        map.insert("query".to_string(), Property { prop_type: "string".to_string(), description: "要搜索的关键字".to_string() });
+                        map
+                    },
+                    required: vec!["dataSource".to_string(), "query".to_string()],
+                },
+            },
         ];
         Ok(json!({ "tools": tools }))
     }
@@ -534,7 +556,7 @@ impl McpServer {
                         properties = Some(map);
                     }
 
-                    let ds_cfg = crate::config::DataSourceConfig {
+                    let ds_cfg = db_core::config::DataSourceConfig {
                         db_type: db_type.to_string(),
                         jdbc_url,
                         host,
@@ -548,9 +570,9 @@ impl McpServer {
 
                     let security_cfg = &self.config.mcp.security;
 
-                    let connector = crate::db::BaseConnector::new(
+                    let connector = db_core::db::BaseConnector::new(
                         db_type,
-                        ds_cfg,
+                        ds_cfg.clone(),
                         security_cfg.query_timeout,
                         security_cfg.max_result_set_size_bytes,
                         self.sql_validator.clone(),
@@ -566,6 +588,11 @@ impl McpServer {
                     }
 
                     self.registry.register(ds_name.to_string(), connector);
+                    if let Some(ref store) = self.metadata_store {
+                        if let Err(e) = store.save_data_source(ds_name, db_type, &ds_cfg).await {
+                            eprintln!("警告: 缓存数据源 '{}' 到本地数据库失败: {}", ds_name, e);
+                        }
+                    }
                     Ok(format!("Successfully registered data source '{}'", ds_name))
                 }
                 "remove_dataSource" => {
@@ -574,6 +601,11 @@ impl McpServer {
                         .and_then(|v| v.as_str())
                         .ok_or_else(|| anyhow::anyhow!("Missing parameter 'name'"))?;
                     if self.registry.unregister(ds_name) {
+                        if let Some(ref store) = self.metadata_store {
+                            if let Err(e) = store.remove_data_source(ds_name).await {
+                                eprintln!("警告: 从本地数据库删除数据源 '{}' 缓存失败: {}", ds_name, e);
+                            }
+                        }
                         Ok(format!("Successfully removed data source '{}'", ds_name))
                     } else {
                         Err(anyhow::anyhow!("Datasource '{}' not found", ds_name))
@@ -604,9 +636,58 @@ impl McpServer {
                         .map(|s| s.to_string());
                     let pattern = args.get("pattern").and_then(|v| v.as_str());
                     let conn = self.registry.get_connector(ds)?;
-                    let mut tables = conn.list_tables(db).await?;
+                    
+                    let mut tables = None;
+                    let ttl_secs = 14400; // 4 hours
+                    
+                    if let Some(ref store) = self.metadata_store {
+                        if let Ok(Some((last_updated, cached_fp))) = store.get_cache_status(ds).await {
+                            let now = chrono::Utc::now().timestamp();
+                            if now - last_updated < ttl_secs {
+                                if let Ok(current_fp) = conn.get_schema_fingerprint(db.clone()).await {
+                                    if cached_fp == current_fp {
+                                        if let Ok(Some(cached_tables)) = store.get_cached_tables(ds).await {
+                                            tables = Some(cached_tables);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    let mut tables = match tables {
+                        Some(t) => t,
+                        None => {
+                            let fetched_tables = conn.list_tables(db.clone()).await?;
+                            if let Some(ref store) = self.metadata_store {
+                                let store_clone = store.clone();
+                                let ds_clone = ds.to_string();
+                                let db_clone = db.clone();
+                                let conn_clone = conn.clone();
+                                let fetched_tables_clone = fetched_tables.clone();
+                                
+                                tokio::spawn(async move {
+                                    let mut columns = Vec::new();
+                                    for t in &fetched_tables_clone {
+                                        if let Ok(cols) = conn_clone.describe_table(db_clone.clone(), &t.name).await {
+                                            columns.push((t.name.clone(), cols));
+                                        }
+                                    }
+                                    let current_fp = conn_clone.get_schema_fingerprint(db_clone).await.ok().flatten();
+                                    let _ = store_clone.update_schema_cache(
+                                        &ds_clone, 
+                                        &fetched_tables_clone, 
+                                        &columns, 
+                                        current_fp.as_deref()
+                                    ).await;
+                                });
+                            }
+                            fetched_tables
+                        }
+                    };
+                    
                     if let Some(pat) = pattern {
-                        let regex_str = crate::config::wildcard_to_regex(pat);
+                        let regex_str = db_core::config::wildcard_to_regex(pat);
                         if let Ok(reg) = regex::Regex::new(&format!("(?i){}", regex_str)) {
                             tables.retain(|t| reg.is_match(&t.name));
                         }
@@ -616,7 +697,56 @@ impl McpServer {
                 "describe_table" => {
                     let (table, db) = self.get_table_and_db(args)?;
                     let conn = self.registry.get_connector(ds)?;
-                    let cols = conn.describe_table(db, table).await?;
+                    
+                    let mut cols = None;
+                    let ttl_secs = 14400;
+                    
+                    if let Some(ref store) = self.metadata_store {
+                        if let Ok(Some((last_updated, cached_fp))) = store.get_cache_status(ds).await {
+                            let now = chrono::Utc::now().timestamp();
+                            if now - last_updated < ttl_secs {
+                                if let Ok(current_fp) = conn.get_schema_fingerprint(db.clone()).await {
+                                    if cached_fp == current_fp {
+                                        if let Ok(Some(cached_cols)) = store.get_cached_columns(ds, table).await {
+                                            cols = Some(cached_cols);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    let cols = match cols {
+                        Some(c) => c,
+                        None => {
+                            let fetched_cols = conn.describe_table(db.clone(), table).await?;
+                            if let Some(ref store) = self.metadata_store {
+                                let store_clone = store.clone();
+                                let ds_clone = ds.to_string();
+                                let db_clone = db.clone();
+                                let conn_clone = conn.clone();
+                                tokio::spawn(async move {
+                                    if let Ok(fetched_tables) = conn_clone.list_tables(db_clone.clone()).await {
+                                        let mut columns = Vec::new();
+                                        for t in &fetched_tables {
+                                            if let Ok(cols) = conn_clone.describe_table(db_clone.clone(), &t.name).await {
+                                                columns.push((t.name.clone(), cols));
+                                            }
+                                        }
+                                        let current_fp = conn_clone.get_schema_fingerprint(db_clone).await.ok().flatten();
+                                        let _ = store_clone.update_schema_cache(
+                                            &ds_clone,
+                                            &fetched_tables,
+                                            &columns,
+                                            current_fp.as_deref()
+                                        ).await;
+                                    }
+                                });
+                            }
+                            fetched_cols
+                        }
+                    };
+                    
                     Ok(serde_json::to_string_pretty(&cols)?)
                 }
                 "list_indexes" => {
@@ -650,7 +780,69 @@ impl McpServer {
                     let limit = max_rows.min(self.config.mcp.security.max_rows);
 
                     let conn = self.registry.get_connector(ds)?;
-                    self.execute_and_audit(&conn, ds, sql, limit).await
+                    let query_res = self.execute_and_audit(&conn, ds, sql, limit).await;
+                    if let Err(ref e) = query_res {
+                        let err_msg = e.to_string().to_lowercase();
+                        if err_msg.contains("no such table") 
+                            || err_msg.contains("no such column") 
+                            || err_msg.contains("table doesn't exist") 
+                            || err_msg.contains("unknown column")
+                            || err_msg.contains("undefined_table")
+                            || err_msg.contains("undefined_column") 
+                        {
+                            if let Some(ref store) = self.metadata_store {
+                                let _ = store.invalidate_schema_cache(ds).await;
+                            }
+                        }
+                    }
+                    query_res
+                }
+                "refresh_schema" => {
+                    let conn = self.registry.get_connector(ds)?;
+                    let db = args
+                        .get("database")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    
+                    if let Some(ref store) = self.metadata_store {
+                        let fetched_tables = conn.list_tables(db.clone()).await?;
+                        let mut columns = Vec::new();
+                        for t in &fetched_tables {
+                            if let Ok(cols) = conn.describe_table(db.clone(), &t.name).await {
+                                columns.push((t.name.clone(), cols));
+                            }
+                        }
+                        let current_fp = conn.get_schema_fingerprint(db).await.ok().flatten();
+                        store.update_schema_cache(
+                            ds, 
+                            &fetched_tables, 
+                            &columns, 
+                            current_fp.as_deref()
+                        ).await?;
+                        Ok(format!("Successfully refreshed schema cache for datasource '{}'", ds))
+                    } else {
+                        Err(anyhow::anyhow!("Metadata cache store is not initialized"))
+                    }
+                }
+                "search_schema" => {
+                    let query = args
+                        .get("query")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| anyhow::anyhow!("Missing parameter 'query'"))?;
+                    if let Some(ref store) = self.metadata_store {
+                        let results = store.search_cached_schema(ds, query).await?;
+                        let mut formatted = Vec::new();
+                        for (tbl, col, comment) in results {
+                            formatted.push(json!({
+                                "table": tbl,
+                                "column": col,
+                                "match": comment
+                            }));
+                        }
+                        Ok(serde_json::to_string_pretty(&formatted)?)
+                    } else {
+                        Err(anyhow::anyhow!("Metadata cache store is not initialized"))
+                    }
                 }
                 "explain_query" => {
                     let sql = args

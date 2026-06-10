@@ -1,17 +1,15 @@
 
 
 use regex::Regex;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs;
-use std::path::Path;
 
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct Config {
     pub mcp: McpConfig,
 }
 
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct McpConfig {
     #[serde(rename = "dataSources")]
     pub data_sources: HashMap<String, DataSourceConfig>,
@@ -19,7 +17,7 @@ pub struct McpConfig {
     pub audit: AuditConfig,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct DataSourceConfig {
     #[serde(rename = "type")]
     pub db_type: String, // MYSQL, POSTGRESQL, SQLITE, SQLSERVER
@@ -34,7 +32,7 @@ pub struct DataSourceConfig {
     pub properties: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SecurityConfig {
     #[serde(rename = "allowedPrefixes")]
     pub allowed_prefixes: Vec<String>,
@@ -46,7 +44,7 @@ pub struct SecurityConfig {
     pub max_result_set_size_bytes: i64,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AuditConfig {
     pub enabled: bool,
     #[serde(rename = "logFile")]
@@ -80,12 +78,6 @@ impl Default for AuditConfig {
             log_results: Some(false),
         }
     }
-}
-
-pub fn load_config<P: AsRef<Path>>(path: P) -> Result<Config, Box<dyn std::error::Error>> {
-    let content = fs::read_to_string(path)?;
-    let config: Config = serde_yaml::from_str(&content)?;
-    Ok(config)
 }
 
 fn build_query_string(properties: &HashMap<String, String>) -> String {

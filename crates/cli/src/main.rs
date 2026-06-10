@@ -1,47 +1,22 @@
-mod config;
-mod db;
-mod mcp;
-mod security;
-
 use clap::Parser;
-use std::path::Path;
 use std::sync::Arc;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
 
+use db_core::{config, db, security};
+use mcp_server as mcp;
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
-struct Args {
-    /// 配置文件路径
-    #[arg(short, long)]
-    config: Option<String>,
-}
+struct Args {}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 安装 sqlx 的 AnyPool 驱动
     sqlx::any::install_default_drivers();
 
-    let args = Args::parse();
+    let _args = Args::parse();
 
-    let cfg = match args.config {
-        Some(ref path) => {
-            if Path::new(path).exists() {
-                eprintln!("正在加载配置文件: {}", path);
-                config::load_config(path)?
-            } else {
-                return Err(format!("错误: 找不到指定的配置文件 '{}'", path).into());
-            }
-        }
-        None => {
-            if Path::new("application.yml").exists() {
-                eprintln!("正在加载默认配置文件: application.yml");
-                config::load_config("application.yml")?
-            } else {
-                eprintln!("未指定配置文件，将使用默认配置启动（无初始数据源）...");
-                config::Config::default()
-            }
-        }
-    };
+    let cfg = config::Config::default();
 
     eprintln!("正在初始化 SQL 校验器和数据源...");
     let security_cfg = cfg.mcp.security.clone();
@@ -76,7 +51,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let server = Arc::new(mcp::McpServer::new(cfg, registry));
+    let meta_db_path = "mcp_meta.db";
+    let metadata_store = Arc::new(db_core::metadata::MetadataStore::new(meta_db_path).await?);
+
+    eprintln!("正在从元数据库还原缓存的数据源...");
+    match metadata_store.list_data_sources().await {
+        Ok(sources) => {
+            for (name, db_type, ds_cfg) in sources {
+                eprintln!("正在还原缓存数据源 '{}' (类型: {})...", name, db_type);
+                match db::BaseConnector::new(
+                    &db_type,
+                    ds_cfg.clone(),
+                    security_cfg.query_timeout,
+                    security_cfg.max_result_set_size_bytes,
+                    sql_validator.clone(),
+                )
+                .await
+                {
+                    Ok(connector) => {
+                        let connected = connector.test_connection().await;
+                        if connected {
+                            eprintln!("数据源 '{}' 连接还原成功！", name);
+                        } else {
+                            eprintln!("警告: 数据源 '{}' 还原失败，物理连接不通，但仍将被注册。", name);
+                        }
+                        registry.register(name, connector);
+                    }
+                    Err(e) => {
+                        eprintln!("警告: 数据源 '{}' 还原连接池失败: {}", name, e);
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("警告: 无法加载缓存的数据源配置: {}", e);
+        }
+    }
+
+    let server = Arc::new(mcp::McpServer::new(cfg, registry, Some(metadata_store)));
 
     eprintln!("db-mcp 服务初始化完成，开始在 STDIO 上监听 JSON-RPC 请求...");
 

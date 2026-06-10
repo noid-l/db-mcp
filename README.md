@@ -5,7 +5,7 @@
 ## 🌟 核心特性
 
 - **多数据库驱动适配**：底层通过 `sqlx` 驱动，完美兼容 **MySQL / MariaDB**, **PostgreSQL**, **SQLite** 以及 **SQL Server**。
-- **零配置开箱即用**：删除了对 `application.yml` 配置文件的强依赖。无需提前配置任何数据库即可一键启动服务，随后在运行时动态建立连接。
+- **零配置开箱即用**：无需任何配置文件。一键启动服务后，完全在运行时通过 MCP 客户端动态注册和管理数据库连接。
 - **动态数据源管理**：
   - 运行时动态添加数据源：支持直连 DSN、JDBC URL 自动转换以及 host/port 表单属性连接。
   - 运行时动态注销数据源：支持断开并销毁现有的连接池释放资源。
@@ -32,17 +32,10 @@ cargo build --release
 编译产物将生成在 `target/release/db-mcp`。
 
 ### 2. 运行服务
-你可以直接以零依赖的纯净模式启动服务：
+直接启动服务即可：
 ```bash
 ./target/release/db-mcp
 ```
-或者，也可以在启动时传入配置文件来初始化预置的数据源：
-```bash
-./target/release/db-mcp --config application.yml
-```
-
-### 3. 配置参考
-如需配置预置数据源、安全参数或审计路径，可参考当前目录下的 [application-example.yml](./application-example.yml)。
 
 ---
 
