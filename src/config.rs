@@ -199,6 +199,17 @@ pub fn convert_to_dsn(cfg: &DataSourceConfig) -> Result<String, anyhow::Error> {
     }
 }
 
+fn split_host_port(host_port: &str, default_port: &str) -> (String, String) {
+    if let Some(pos) = host_port.find(':') {
+        (
+            host_port[..pos].to_string(),
+            host_port[pos + 1..].to_string(),
+        )
+    } else {
+        (host_port.to_string(), default_port.to_string())
+    }
+}
+
 fn parse_jdbc_url(jdbc_url: &str, username: &str, password: &str) -> Result<String, anyhow::Error> {
     if !jdbc_url.starts_with("jdbc:") {
         return Err(anyhow::anyhow!("Invalid JDBC URL: must start with 'jdbc:'"));
@@ -258,13 +269,7 @@ fn parse_jdbc_url(jdbc_url: &str, username: &str, password: &str) -> Result<Stri
                 ""
             };
 
-            let mut host = host_port.to_string();
-            let mut port = "5432".to_string();
-            if host_port.contains(':') {
-                let hp: Vec<&str> = host_port.splitn(2, ':').collect();
-                host = hp[0].to_string();
-                port = hp[1].to_string();
-            }
+            let (host, port) = split_host_port(host_port, "5432");
 
             let mut sslmode = "disable".to_string();
             if params.contains("ssl=true") {
@@ -298,13 +303,7 @@ fn parse_jdbc_url(jdbc_url: &str, username: &str, password: &str) -> Result<Stri
             let parts: Vec<&str> = rem.split(';').collect();
             let host_port = parts[0];
 
-            let mut host = host_port.to_string();
-            let mut port = "1433".to_string();
-            if host_port.contains(':') {
-                let hp: Vec<&str> = host_port.splitn(2, ':').collect();
-                host = hp[0].to_string();
-                port = hp[1].to_string();
-            }
+            let (host, port) = split_host_port(host_port, "1433");
 
             let mut db_name = "";
             let mut extra = Vec::new();
