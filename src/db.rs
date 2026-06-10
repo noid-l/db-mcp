@@ -1,9 +1,9 @@
+use anyhow::Result;
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sqlx::{Column, Row, TypeInfo, any::Any};
 use std::collections::HashMap;
 use std::time::Duration;
-use anyhow::Result;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct TableMetadata {
@@ -71,7 +71,7 @@ impl BaseConnector {
         sql_validator: crate::security::SqlValidator,
     ) -> Result<Self> {
         let dsn = crate::config::convert_to_dsn(&config)?;
-        
+
         // 建立动态连接池
         let pool = sqlx::Pool::<Any>::connect(&dsn).await?;
 
@@ -119,15 +119,22 @@ impl BaseConnector {
             }
         }
 
-        self.config.database.clone().unwrap_or_else(|| "main".to_string())
+        self.config
+            .database
+            .clone()
+            .unwrap_or_else(|| "main".to_string())
     }
 
     pub async fn list_databases(&self) -> Result<Vec<String>> {
         let db_type_upper = self.db_type.to_uppercase();
         let query = match db_type_upper.as_str() {
             "MYSQL" | "MARIADB" | "GBASE" => "SHOW DATABASES",
-            "POSTGRESQL" | "KINGBASE" | "HIGHGO" => "SELECT datname FROM pg_database WHERE datistemplate = false",
-            "SQLSERVER" => "SELECT name FROM sys.databases WHERE name NOT IN ('master', 'tempdb', 'model', 'msdb')",
+            "POSTGRESQL" | "KINGBASE" | "HIGHGO" => {
+                "SELECT datname FROM pg_database WHERE datistemplate = false"
+            }
+            "SQLSERVER" => {
+                "SELECT name FROM sys.databases WHERE name NOT IN ('master', 'tempdb', 'model', 'msdb')"
+            }
             "SQLITE" => return Ok(vec!["main".to_string()]),
             _ => return Err(anyhow::anyhow!("Unsupported database type")),
         };
@@ -223,7 +230,11 @@ impl BaseConnector {
         Ok(tables)
     }
 
-    pub async fn describe_table(&self, database: Option<String>, table: &str) -> Result<Vec<ColumnMetadata>> {
+    pub async fn describe_table(
+        &self,
+        database: Option<String>,
+        table: &str,
+    ) -> Result<Vec<ColumnMetadata>> {
         let db = match database {
             Some(d) => d,
             None => self.get_default_database_name().await,
@@ -278,7 +289,11 @@ impl BaseConnector {
                         size: 0,
                         digits: None,
                         nullable,
-                        default_value: if def_val.is_empty() { None } else { Some(def_val) },
+                        default_value: if def_val.is_empty() {
+                            None
+                        } else {
+                            Some(def_val)
+                        },
                         primary_key: is_pk,
                         comment,
                     });
@@ -286,7 +301,8 @@ impl BaseConnector {
             }
             "SQLITE" => {
                 let rows = sqlx::query(&format!("PRAGMA table_info({})", table))
-                    .fetch_all(&self.pool).await?;
+                    .fetch_all(&self.pool)
+                    .await?;
                 for row in rows {
                     let name: String = row.try_get(1)?;
                     let type_name: String = row.try_get(2)?;
@@ -336,7 +352,11 @@ impl BaseConnector {
         Ok(columns)
     }
 
-    pub async fn list_indexes(&self, database: Option<String>, table: &str) -> Result<Vec<HashMap<String, Value>>> {
+    pub async fn list_indexes(
+        &self,
+        database: Option<String>,
+        table: &str,
+    ) -> Result<Vec<HashMap<String, Value>>> {
         let db = match database {
             Some(d) => d,
             None => self.get_default_database_name().await,
@@ -384,7 +404,8 @@ impl BaseConnector {
             }
             "SQLITE" => {
                 let rows = sqlx::query(&format!("PRAGMA index_list({})", table))
-                    .fetch_all(&self.pool).await?;
+                    .fetch_all(&self.pool)
+                    .await?;
                 let mut items = Vec::new();
                 for row in rows {
                     let name: String = row.try_get(1)?;
@@ -394,7 +415,8 @@ impl BaseConnector {
 
                 for item in items {
                     let info_rows = sqlx::query(&format!("PRAGMA index_info({})", item.0))
-                        .fetch_all(&self.pool).await?;
+                        .fetch_all(&self.pool)
+                        .await?;
                     for row in info_rows {
                         let seqno: i64 = row.try_get(0)?;
                         let col_name: String = row.try_get(2)?;
@@ -413,7 +435,11 @@ impl BaseConnector {
         Ok(indexes)
     }
 
-    pub async fn get_imported_keys(&self, database: Option<String>, table: &str) -> Result<Vec<HashMap<String, Value>>> {
+    pub async fn get_imported_keys(
+        &self,
+        database: Option<String>,
+        table: &str,
+    ) -> Result<Vec<HashMap<String, Value>>> {
         let db = match database {
             Some(d) => d,
             None => self.get_default_database_name().await,
@@ -469,7 +495,8 @@ impl BaseConnector {
             }
             "SQLITE" => {
                 let rows = sqlx::query(&format!("PRAGMA foreign_key_list({})", table))
-                    .fetch_all(&self.pool).await?;
+                    .fetch_all(&self.pool)
+                    .await?;
                 for row in rows {
                     let id: i64 = row.try_get(0)?;
                     let seq: i64 = row.try_get(1)?;
@@ -502,9 +529,12 @@ impl BaseConnector {
 
         match db_type_upper.as_str() {
             "SQLITE" => {
-                let row = sqlx::query("SELECT sql FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?")
-                    .bind(table)
-                    .fetch_one(&self.pool).await?;
+                let row = sqlx::query(
+                    "SELECT sql FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?",
+                )
+                .bind(table)
+                .fetch_one(&self.pool)
+                .await?;
                 let sql: String = row.try_get(0)?;
                 Ok(sql)
             }
@@ -548,8 +578,15 @@ impl BaseConnector {
                     } else {
                         "".to_string()
                     };
-                    let comma = if i == cols.len() - 1 && pk_cols.is_empty() { "" } else { "," };
-                    ddl.push_str(&format!("  \"{}\" {}{}{}{}\n", col.name, col.type_name, nullable_str, def_str, comma));
+                    let comma = if i == cols.len() - 1 && pk_cols.is_empty() {
+                        ""
+                    } else {
+                        ","
+                    };
+                    ddl.push_str(&format!(
+                        "  \"{}\" {}{}{}{}\n",
+                        col.name, col.type_name, nullable_str, def_str, comma
+                    ));
                     if col.primary_key {
                         pk_cols.push(format!("\"{}\"", col.name));
                     }
@@ -567,8 +604,15 @@ impl BaseConnector {
                 let mut pk_cols = Vec::new();
                 for (i, col) in cols.iter().enumerate() {
                     let nullable_str = if col.nullable { " NULL" } else { " NOT NULL" };
-                    let comma = if i == cols.len() - 1 && pk_cols.is_empty() { "" } else { "," };
-                    ddl.push_str(&format!("  \"{}\" {}{}{}\n", col.name, col.type_name, nullable_str, comma));
+                    let comma = if i == cols.len() - 1 && pk_cols.is_empty() {
+                        ""
+                    } else {
+                        ","
+                    };
+                    ddl.push_str(&format!(
+                        "  \"{}\" {}{}{}\n",
+                        col.name, col.type_name, nullable_str, comma
+                    ));
                     if col.primary_key {
                         pk_cols.push(format!("\"{}\"", col.name));
                     }
@@ -588,23 +632,33 @@ impl BaseConnector {
 
         let mut sql_to_execute = sql_str.trim().to_string();
         let sql_lower = sql_to_execute.to_lowercase();
-        
+
         // 自动追加 LIMIT (针对支持的 MySQL, Postgres, SQLite)
         if sql_lower.starts_with("select") && !sql_lower.contains("limit") {
             let db_type_upper = self.db_type.to_uppercase();
-            if db_type_upper == "MYSQL" || db_type_upper == "POSTGRESQL" || db_type_upper == "SQLITE" || db_type_upper == "MARIADB" {
+            if db_type_upper == "MYSQL"
+                || db_type_upper == "POSTGRESQL"
+                || db_type_upper == "SQLITE"
+                || db_type_upper == "MARIADB"
+            {
                 sql_to_execute = format!("{} LIMIT {}", sql_to_execute, max_rows);
             }
         }
 
         let start_time = std::time::Instant::now();
-        
+
         // 我们需要使用 sqlx::query 执行，并提取 metadata 及 row
         let rows = tokio::time::timeout(
             std::time::Duration::from_secs(self.query_timeout),
-            sqlx::query(&sql_to_execute).fetch_all(&self.pool)
-        ).await
-        .map_err(|_| anyhow::anyhow!("Query execution timed out after {} seconds", self.query_timeout))??;
+            sqlx::query(&sql_to_execute).fetch_all(&self.pool),
+        )
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "Query execution timed out after {} seconds",
+                self.query_timeout
+            )
+        })??;
 
         let duration = start_time.elapsed().as_millis() as i64;
 
@@ -614,7 +668,7 @@ impl BaseConnector {
                 rows: Vec::new(),
                 row_count: 0,
                 execution_time_ms: duration,
-				truncated: false,
+                truncated: false,
             });
         }
 
@@ -643,10 +697,10 @@ impl BaseConnector {
 
             let mut row_map = HashMap::new();
             let mut row_size = 0;
-            
+
             for (i, col) in row.columns().iter().enumerate() {
                 let val = get_any_value(&row, i);
-                
+
                 // 计算估算大小
                 if let Value::String(ref s) = val {
                     row_size += s.len() as i64 * 2;
@@ -676,10 +730,17 @@ impl BaseConnector {
         })
     }
 
-    pub async fn count_rows(&self, database: Option<String>, table: &str, where_clause: Option<String>) -> Result<i64> {
+    pub async fn count_rows(
+        &self,
+        database: Option<String>,
+        table: &str,
+        where_clause: Option<String>,
+    ) -> Result<i64> {
         if let Some(ref w) = where_clause {
             if crate::config::contains_subquery(w) {
-                return Err(anyhow::anyhow!("Subqueries are not allowed in count_rows filter"));
+                return Err(anyhow::anyhow!(
+                    "Subqueries are not allowed in count_rows filter"
+                ));
             }
         }
 
@@ -710,7 +771,12 @@ impl BaseConnector {
         Ok(count)
     }
 
-    pub async fn sample_data(&self, database: Option<String>, table: &str, limit: usize) -> Result<QueryResult> {
+    pub async fn sample_data(
+        &self,
+        database: Option<String>,
+        table: &str,
+        limit: usize,
+    ) -> Result<QueryResult> {
         let db = match database {
             Some(d) => d,
             None => self.get_default_database_name().await,
@@ -736,7 +802,9 @@ fn get_any_value(row: &sqlx::any::AnyRow, index: usize) -> Value {
     // 依次尝试获取，或者根据类型名识别
     match type_name.as_str() {
         "TEXT" | "VARCHAR" | "CHAR" | "VARCHAR2" | "NVARCHAR" | "NCHAR" | "STRING" | "BPCHAR" => {
-            row.try_get::<String, _>(index).map(|s| json!(s)).unwrap_or(Value::Null)
+            row.try_get::<String, _>(index)
+                .map(|s| json!(s))
+                .unwrap_or(Value::Null)
         }
         "INT" | "INTEGER" | "BIGINT" | "INT8" | "INT4" | "INT2" | "SMALLINT" | "TINYINT" => {
             if let Ok(val) = row.try_get::<i64, _>(index) {
@@ -755,12 +823,15 @@ fn get_any_value(row: &sqlx::any::AnyRow, index: usize) -> Value {
             } else if let Ok(val) = row.try_get::<f32, _>(index) {
                 json!(val)
             } else {
-                row.try_get::<String, _>(index).map(|s| json!(s)).unwrap_or(Value::Null)
+                row.try_get::<String, _>(index)
+                    .map(|s| json!(s))
+                    .unwrap_or(Value::Null)
             }
         }
-        "BOOLEAN" | "BOOL" => {
-            row.try_get::<bool, _>(index).map(|b| json!(b)).unwrap_or(Value::Null)
-        }
+        "BOOLEAN" | "BOOL" => row
+            .try_get::<bool, _>(index)
+            .map(|b| json!(b))
+            .unwrap_or(Value::Null),
         _ => {
             // 兜底尝试
             if let Ok(s) = row.try_get::<String, _>(index) {
@@ -809,6 +880,8 @@ impl DataSourceRegistry {
 
     pub fn get_datasource_types(&self) -> HashMap<String, String> {
         let map = self.connectors.read().unwrap();
-        map.iter().map(|(k, v)| (k.clone(), v.db_type().to_uppercase())).collect()
+        map.iter()
+            .map(|(k, v)| (k.clone(), v.db_type().to_uppercase()))
+            .collect()
     }
 }

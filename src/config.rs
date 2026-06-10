@@ -1,8 +1,8 @@
+use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use regex::Regex;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Config {
@@ -114,7 +114,11 @@ pub fn convert_to_dsn(cfg: &DataSourceConfig) -> Result<String, anyhow::Error> {
 
     // 如果配置了 jdbcUrl
     if let Some(ref jdbc_url) = cfg.jdbc_url {
-        return parse_jdbc_url(jdbc_url, cfg.username.as_deref().unwrap_or(""), cfg.password.as_deref().unwrap_or(""));
+        return parse_jdbc_url(
+            jdbc_url,
+            cfg.username.as_deref().unwrap_or(""),
+            cfg.password.as_deref().unwrap_or(""),
+        );
     }
 
     let username = cfg.username.as_deref().unwrap_or("");
@@ -125,10 +129,18 @@ pub fn convert_to_dsn(cfg: &DataSourceConfig) -> Result<String, anyhow::Error> {
     match db_type.as_str() {
         "MYSQL" | "MARIADB" | "GBASE" => {
             let port = cfg.port.unwrap_or(3306);
-            let mut dsn = format!("mysql://{}:{}@{}:{}/{}", username, password, host, port, database);
+            let mut dsn = format!(
+                "mysql://{}:{}@{}:{}/{}",
+                username, password, host, port, database
+            );
             if let Some(ref props) = cfg.properties {
                 if !props.is_empty() {
-                    let parts: Vec<String> = props.iter().map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))).collect();
+                    let parts: Vec<String> = props
+                        .iter()
+                        .map(|(k, v)| {
+                            format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
+                        })
+                        .collect();
                     dsn = format!("{}?{}", dsn, parts.join("&"));
                 }
             }
@@ -140,40 +152,71 @@ pub fn convert_to_dsn(cfg: &DataSourceConfig) -> Result<String, anyhow::Error> {
                 if let Some(val) = props.get("sslmode") {
                     val.clone()
                 } else if let Some(val) = props.get("ssl") {
-                    if val == "true" { "require".to_string() } else { "disable".to_string() }
+                    if val == "true" {
+                        "require".to_string()
+                    } else {
+                        "disable".to_string()
+                    }
                 } else {
                     "disable".to_string()
                 }
             } else {
                 "disable".to_string()
             };
-            let mut dsn = format!("postgres://{}:{}@{}:{}/{}?sslmode={}", 
-                urlencoding::encode(username), urlencoding::encode(password), host, port, database, sslmode);
+            let mut dsn = format!(
+                "postgres://{}:{}@{}:{}/{}?sslmode={}",
+                urlencoding::encode(username),
+                urlencoding::encode(password),
+                host,
+                port,
+                database,
+                sslmode
+            );
             if let Some(ref props) = cfg.properties {
                 for (k, v) in props {
                     if k != "sslmode" && k != "ssl" {
-                        dsn = format!("{}&{}={}", dsn, urlencoding::encode(k), urlencoding::encode(v));
+                        dsn = format!(
+                            "{}&{}={}",
+                            dsn,
+                            urlencoding::encode(k),
+                            urlencoding::encode(v)
+                        );
                     }
                 }
             }
             Ok(dsn)
         }
         "SQLITE" => {
-            let db_path = if database.is_empty() { ":memory:" } else { database };
+            let db_path = if database.is_empty() {
+                ":memory:"
+            } else {
+                database
+            };
             Ok(format!("sqlite://{}", db_path))
         }
         "SQLSERVER" => {
             let port = cfg.port.unwrap_or(1433);
-            let mut dsn = format!("mssql://{}:{}@{}:{}/{}", username, password, host, port, database);
+            let mut dsn = format!(
+                "mssql://{}:{}@{}:{}/{}",
+                username, password, host, port, database
+            );
             if let Some(ref props) = cfg.properties {
                 if !props.is_empty() {
-                    let parts: Vec<String> = props.iter().map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))).collect();
+                    let parts: Vec<String> = props
+                        .iter()
+                        .map(|(k, v)| {
+                            format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
+                        })
+                        .collect();
                     dsn = format!("{}?{}", dsn, parts.join("&"));
                 }
             }
             Ok(dsn)
         }
-        _ => Err(anyhow::anyhow!("Unsupported database type: {}", cfg.db_type)),
+        _ => Err(anyhow::anyhow!(
+            "Unsupported database type: {}",
+            cfg.db_type
+        )),
     }
 }
 
@@ -182,38 +225,59 @@ fn parse_jdbc_url(jdbc_url: &str, username: &str, password: &str) -> Result<Stri
         return Err(anyhow::anyhow!("Invalid JDBC URL: must start with 'jdbc:'"));
     }
     let sub = &jdbc_url[5..];
-    let idx = sub.find(':').ok_or_else(|| anyhow::anyhow!("Invalid JDBC URL: missing protocol"))?;
+    let idx = sub
+        .find(':')
+        .ok_or_else(|| anyhow::anyhow!("Invalid JDBC URL: missing protocol"))?;
     let proto = &sub[..idx].to_lowercase();
-    let rem = &sub[idx+1..];
+    let rem = &sub[idx + 1..];
 
     match proto.as_str() {
         "mysql" | "mariadb" => {
             let rem = rem.trim_start_matches("//");
             let parts: Vec<&str> = rem.splitn(2, '?').collect();
             let addr_and_db = parts[0];
-            let params = if parts.len() > 1 { format!("?{}", parts[1]) } else { "".to_string() };
-            
+            let params = if parts.len() > 1 {
+                format!("?{}", parts[1])
+            } else {
+                "".to_string()
+            };
+
             let addr_parts: Vec<&str> = addr_and_db.splitn(2, '/').collect();
             let host_port = addr_parts[0];
-            let db_name = if addr_parts.len() > 1 { addr_parts[1] } else { "" };
-            
+            let db_name = if addr_parts.len() > 1 {
+                addr_parts[1]
+            } else {
+                ""
+            };
+
             let host_port = if !host_port.contains(':') {
                 format!("{}:3306", host_port)
             } else {
                 host_port.to_string()
             };
 
-            Ok(format!("mysql://{}:{}@{}/{}{}", username, password, host_port, db_name, params))
+            Ok(format!(
+                "mysql://{}:{}@{}/{}{}",
+                username, password, host_port, db_name, params
+            ))
         }
         "postgresql" | "kingbase8" | "highgo" => {
             let rem = rem.trim_start_matches("//");
             let parts: Vec<&str> = rem.splitn(2, '?').collect();
             let addr_and_db = parts[0];
-            let params = if parts.len() > 1 { format!("?{}", parts[1]) } else { "".to_string() };
+            let params = if parts.len() > 1 {
+                format!("?{}", parts[1])
+            } else {
+                "".to_string()
+            };
 
             let addr_parts: Vec<&str> = addr_and_db.splitn(2, '/').collect();
             let host_port = addr_parts[0];
-            let db_name = if addr_parts.len() > 1 { addr_parts[1] } else { "" };
+            let db_name = if addr_parts.len() > 1 {
+                addr_parts[1]
+            } else {
+                ""
+            };
 
             let mut host = host_port.to_string();
             let mut port = "5432".to_string();
@@ -228,8 +292,15 @@ fn parse_jdbc_url(jdbc_url: &str, username: &str, password: &str) -> Result<Stri
                 sslmode = "require".to_string();
             }
 
-            let mut dsn = format!("postgres://{}:{}@{}:{}/{}{}", 
-                urlencoding::encode(username), urlencoding::encode(password), host, port, db_name, params);
+            let mut dsn = format!(
+                "postgres://{}:{}@{}:{}/{}{}",
+                urlencoding::encode(username),
+                urlencoding::encode(password),
+                host,
+                port,
+                db_name,
+                params
+            );
             if !dsn.contains("sslmode=") {
                 if dsn.contains('?') {
                     dsn = format!("{}&sslmode={}", dsn, sslmode);
@@ -247,7 +318,7 @@ fn parse_jdbc_url(jdbc_url: &str, username: &str, password: &str) -> Result<Stri
             let rem = rem.trim_start_matches("//");
             let parts: Vec<&str> = rem.split(';').collect();
             let host_port = parts[0];
-            
+
             let mut host = host_port.to_string();
             let mut port = "1433".to_string();
             if host_port.contains(':') {
@@ -259,7 +330,9 @@ fn parse_jdbc_url(jdbc_url: &str, username: &str, password: &str) -> Result<Stri
             let mut db_name = "";
             let mut extra = Vec::new();
             for part in parts.iter().skip(1) {
-                if part.is_empty() { continue; }
+                if part.is_empty() {
+                    continue;
+                }
                 let kv: Vec<&str> = part.splitn(2, '=').collect();
                 if kv.len() == 2 {
                     let k = kv[0].trim().to_lowercase();
@@ -267,13 +340,23 @@ fn parse_jdbc_url(jdbc_url: &str, username: &str, password: &str) -> Result<Stri
                     if k == "databasename" || k == "database" {
                         db_name = v;
                     } else {
-                        extra.push(format!("{}={}", urlencoding::encode(&k), urlencoding::encode(v)));
+                        extra.push(format!(
+                            "{}={}",
+                            urlencoding::encode(&k),
+                            urlencoding::encode(v)
+                        ));
                     }
                 }
             }
 
-            let mut dsn = format!("mssql://{}:{}@{}:{}/{}", 
-                urlencoding::encode(username), urlencoding::encode(password), host, port, db_name);
+            let mut dsn = format!(
+                "mssql://{}:{}@{}:{}/{}",
+                urlencoding::encode(username),
+                urlencoding::encode(password),
+                host,
+                port,
+                db_name
+            );
             if !extra.is_empty() {
                 dsn = format!("{}?{}", dsn, extra.join("&"));
             }
@@ -299,7 +382,7 @@ pub fn normalize_sql(sql: &str) -> String {
             " ".to_string()
         }
     });
-    
+
     // 压缩空白
     let space_re = Regex::new(r#"\s+"#).unwrap();
     space_re.replace_all(&result, " ").trim().to_string()

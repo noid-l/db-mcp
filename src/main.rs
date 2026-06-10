@@ -50,10 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry = Arc::new(db::DataSourceRegistry::new());
 
     for (name, ds_cfg) in &cfg.mcp.data_sources {
-        eprintln!(
-            "正在初始化数据源 '{}' (类型: {})...",
-            name, ds_cfg.db_type
-        );
+        eprintln!("正在初始化数据源 '{}' (类型: {})...", name, ds_cfg.db_type);
         match db::BaseConnector::new(
             &ds_cfg.db_type,
             ds_cfg.clone(),

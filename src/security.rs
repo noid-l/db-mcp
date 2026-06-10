@@ -18,7 +18,9 @@ impl SqlValidator {
         let clean_lower = normalized.to_lowercase();
 
         if clean_lower.is_empty() {
-            return Err(anyhow::anyhow!("SQL query contains only whitespace or comments"));
+            return Err(anyhow::anyhow!(
+                "SQL query contains only whitespace or comments"
+            ));
         }
 
         let mut has_allowed_prefix = false;

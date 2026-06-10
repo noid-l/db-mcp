@@ -1,12 +1,12 @@
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
-use anyhow::Result;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct JsonRpcRequest {
@@ -95,13 +95,28 @@ pub struct McpServer {
 }
 
 impl McpServer {
-    pub fn new(config: crate::config::Config, registry: Arc<crate::db::DataSourceRegistry>) -> Self {
+    pub fn new(
+        config: crate::config::Config,
+        registry: Arc<crate::db::DataSourceRegistry>,
+    ) -> Self {
         let security_cfg = config.mcp.security.clone();
-        let sql_validator = crate::security::SqlValidator::new(security_cfg.allowed_prefixes.clone());
-        Self { config, registry, sql_validator }
+        let sql_validator =
+            crate::security::SqlValidator::new(security_cfg.allowed_prefixes.clone());
+        Self {
+            config,
+            registry,
+            sql_validator,
+        }
     }
 
-    pub fn audit(&self, ds: &str, sql: &str, elapsed_ms: i64, row_count: usize, err: Option<&anyhow::Error>) {
+    pub fn audit(
+        &self,
+        ds: &str,
+        sql: &str,
+        elapsed_ms: i64,
+        row_count: usize,
+        err: Option<&anyhow::Error>,
+    ) {
         if !self.config.mcp.audit.enabled {
             return;
         }
@@ -125,7 +140,12 @@ impl McpServer {
             sql
         );
 
-        if let Ok(mut file) = OpenOptions::new().create(true).write(true).append(true).open(log_file) {
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .append(true)
+            .open(log_file)
+        {
             let _ = file.write_all(log_line.as_bytes());
         } else {
             eprint!("[AUDIT] {}", log_line);
@@ -423,8 +443,13 @@ impl McpServer {
 
     async fn handle_tools_call(&self, params: Option<Value>) -> Result<Value> {
         let p = params.ok_or_else(|| anyhow::anyhow!("Missing params"))?;
-        let name = p.get("name").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("Missing parameter 'name'"))?;
-        let arguments = p.get("arguments").ok_or_else(|| anyhow::anyhow!("Missing parameter 'arguments'"))?;
+        let name = p
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing parameter 'name'"))?;
+        let arguments = p
+            .get("arguments")
+            .ok_or_else(|| anyhow::anyhow!("Missing parameter 'arguments'"))?;
 
         let (content, is_error) = self.call_tool(name, arguments).await;
         Ok(json!({
@@ -437,27 +462,58 @@ impl McpServer {
         let ds = match args.get("dataSource").and_then(|v| v.as_str()) {
             Some(s) => s,
             None => {
-                if name == "list_dataSources" || name == "add_dataSource" || name == "remove_dataSource" { "" } else { return ("Missing parameter 'dataSource'".to_string(), true); }
+                if name == "list_dataSources"
+                    || name == "add_dataSource"
+                    || name == "remove_dataSource"
+                {
+                    ""
+                } else {
+                    return ("Missing parameter 'dataSource'".to_string(), true);
+                }
             }
         };
 
         let result: Result<String> = async {
             match name {
-                "list_dataSources" => {
-                    Ok(serde_json::to_string_pretty(&self.registry.get_datasource_types())?)
-                }
+                "list_dataSources" => Ok(serde_json::to_string_pretty(
+                    &self.registry.get_datasource_types(),
+                )?),
                 "add_dataSource" => {
-                    let ds_name = args.get("name").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("Missing parameter 'name'"))?;
-                    let db_type = args.get("dbType").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("Missing parameter 'dbType'"))?;
-                    
-                    let dsn = args.get("dsn").and_then(|v| v.as_str()).map(|s| s.to_string());
-                    let jdbc_url = args.get("jdbcUrl").and_then(|v| v.as_str()).map(|s| s.to_string());
-                    let host = args.get("host").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let ds_name = args
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| anyhow::anyhow!("Missing parameter 'name'"))?;
+                    let db_type = args
+                        .get("dbType")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| anyhow::anyhow!("Missing parameter 'dbType'"))?;
+
+                    let dsn = args
+                        .get("dsn")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let jdbc_url = args
+                        .get("jdbcUrl")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let host = args
+                        .get("host")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
                     let port = args.get("port").and_then(|v| v.as_u64()).map(|n| n as u16);
-                    let database = args.get("database").and_then(|v| v.as_str()).map(|s| s.to_string());
-                    let username = args.get("username").and_then(|v| v.as_str()).map(|s| s.to_string());
-                    let password = args.get("password").and_then(|v| v.as_str()).map(|s| s.to_string());
-                    
+                    let database = args
+                        .get("database")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let username = args
+                        .get("username")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let password = args
+                        .get("password")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+
                     let mut properties = None;
                     if let Some(props_val) = args.get("properties") {
                         if let Some(obj) = props_val.as_object() {
@@ -484,25 +540,32 @@ impl McpServer {
                     };
 
                     let security_cfg = &self.config.mcp.security;
-                    
+
                     let connector = crate::db::BaseConnector::new(
                         db_type,
                         ds_cfg,
                         security_cfg.query_timeout,
                         security_cfg.max_result_set_size_bytes,
-                        self.sql_validator.clone()
-                    ).await?;
+                        self.sql_validator.clone(),
+                    )
+                    .await?;
 
                     // 测试连接
                     if !connector.test_connection().await {
-                        return Err(anyhow::anyhow!("Failed to establish a connection to datasource '{}'", ds_name));
+                        return Err(anyhow::anyhow!(
+                            "Failed to establish a connection to datasource '{}'",
+                            ds_name
+                        ));
                     }
 
                     self.registry.register(ds_name.to_string(), connector);
                     Ok(format!("Successfully registered data source '{}'", ds_name))
                 }
                 "remove_dataSource" => {
-                    let ds_name = args.get("name").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("Missing parameter 'name'"))?;
+                    let ds_name = args
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| anyhow::anyhow!("Missing parameter 'name'"))?;
                     if self.registry.unregister(ds_name) {
                         Ok(format!("Successfully removed data source '{}'", ds_name))
                     } else {
@@ -516,7 +579,11 @@ impl McpServer {
                 }
                 "get_datasource_info" => {
                     let conn = self.registry.get_connector(ds)?;
-                    Ok(format!("Type: {} | Version: {}", conn.db_type(), conn.get_version()))
+                    Ok(format!(
+                        "Type: {} | Version: {}",
+                        conn.db_type(),
+                        conn.get_version()
+                    ))
                 }
                 "list_databases" => {
                     let conn = self.registry.get_connector(ds)?;
@@ -524,7 +591,10 @@ impl McpServer {
                     Ok(serde_json::to_string_pretty(&dbs)?)
                 }
                 "list_tables" => {
-                    let db = args.get("database").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let db = args
+                        .get("database")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
                     let pattern = args.get("pattern").and_then(|v| v.as_str());
                     let conn = self.registry.get_connector(ds)?;
                     let mut tables = conn.list_tables(db).await?;
@@ -537,36 +607,66 @@ impl McpServer {
                     Ok(serde_json::to_string_pretty(&tables)?)
                 }
                 "describe_table" => {
-                    let table = args.get("table").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("Missing table"))?;
-                    let db = args.get("database").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let table = args
+                        .get("table")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| anyhow::anyhow!("Missing table"))?;
+                    let db = args
+                        .get("database")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
                     let conn = self.registry.get_connector(ds)?;
                     let cols = conn.describe_table(db, table).await?;
                     Ok(serde_json::to_string_pretty(&cols)?)
                 }
                 "list_indexes" => {
-                    let table = args.get("table").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("Missing table"))?;
-                    let db = args.get("database").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let table = args
+                        .get("table")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| anyhow::anyhow!("Missing table"))?;
+                    let db = args
+                        .get("database")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
                     let conn = self.registry.get_connector(ds)?;
                     let idxs = conn.list_indexes(db, table).await?;
                     Ok(serde_json::to_string_pretty(&idxs)?)
                 }
                 "get_foreign_keys" => {
-                    let table = args.get("table").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("Missing table"))?;
-                    let db = args.get("database").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let table = args
+                        .get("table")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| anyhow::anyhow!("Missing table"))?;
+                    let db = args
+                        .get("database")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
                     let conn = self.registry.get_connector(ds)?;
                     let fkeys = conn.get_imported_keys(db, table).await?;
                     Ok(serde_json::to_string_pretty(&fkeys)?)
                 }
                 "get_table_ddl" => {
-                    let table = args.get("table").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("Missing table"))?;
-                    let db = args.get("database").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let table = args
+                        .get("table")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| anyhow::anyhow!("Missing table"))?;
+                    let db = args
+                        .get("database")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
                     let conn = self.registry.get_connector(ds)?;
                     let ddl = conn.get_table_ddl(db, table).await?;
                     Ok(ddl)
                 }
                 "execute_query" => {
-                    let sql = args.get("sql").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("Missing parameter 'sql'"))?;
-                    let max_rows_param = args.get("maxRows").and_then(|v| v.as_i64()).map(|n| n as usize);
+                    let sql = args
+                        .get("sql")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| anyhow::anyhow!("Missing parameter 'sql'"))?;
+                    let max_rows_param = args
+                        .get("maxRows")
+                        .and_then(|v| v.as_i64())
+                        .map(|n| n as usize);
                     let max_rows = max_rows_param.unwrap_or(self.config.mcp.security.max_rows);
                     let limit = max_rows.min(self.config.mcp.security.max_rows);
 
@@ -586,10 +686,13 @@ impl McpServer {
                     Ok(serde_json::to_string_pretty(&res?)?)
                 }
                 "explain_query" => {
-                    let sql = args.get("sql").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("Missing parameter 'sql'"))?;
+                    let sql = args
+                        .get("sql")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| anyhow::anyhow!("Missing parameter 'sql'"))?;
                     let explain_sql = format!("EXPLAIN {}", sql);
                     let conn = self.registry.get_connector(ds)?;
-                    
+
                     let start = Instant::now();
                     let res = conn.execute_query(&explain_sql, 100).await;
                     let elapsed = start.elapsed().as_millis() as i64;
@@ -605,24 +708,45 @@ impl McpServer {
                     Ok(serde_json::to_string_pretty(&res?)?)
                 }
                 "count_rows" => {
-                    let table = args.get("table").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("Missing table"))?;
-                    let db = args.get("database").and_then(|v| v.as_str()).map(|s| s.to_string());
-                    let where_clause = args.get("where").and_then(|v| v.as_str()).map(|s| s.to_string());
+                    let table = args
+                        .get("table")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| anyhow::anyhow!("Missing table"))?;
+                    let db = args
+                        .get("database")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let where_clause = args
+                        .get("where")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
                     let conn = self.registry.get_connector(ds)?;
                     let count = conn.count_rows(db, table, where_clause).await?;
                     Ok(count.to_string())
                 }
                 "sample_data" => {
-                    let table = args.get("table").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("Missing table"))?;
-                    let db = args.get("database").and_then(|v| v.as_str()).map(|s| s.to_string());
-                    let limit = args.get("limit").and_then(|v| v.as_i64()).map(|n| n as usize).unwrap_or(10).min(100);
+                    let table = args
+                        .get("table")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| anyhow::anyhow!("Missing table"))?;
+                    let db = args
+                        .get("database")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    let limit = args
+                        .get("limit")
+                        .and_then(|v| v.as_i64())
+                        .map(|n| n as usize)
+                        .unwrap_or(10)
+                        .min(100);
                     let conn = self.registry.get_connector(ds)?;
                     let res = conn.sample_data(db, table, limit).await?;
                     Ok(serde_json::to_string_pretty(&res)?)
                 }
                 _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
             }
-        }.await;
+        }
+        .await;
 
         match result {
             Ok(content) => (content, false),
@@ -631,20 +755,21 @@ impl McpServer {
     }
 
     async fn handle_resources_list(&self) -> Result<Value> {
-        let resources = vec![
-            Resource {
-                uri: "db://dataSources".to_string(),
-                name: "dataSources".to_string(),
-                mime_type: "text/plain".to_string(),
-                description: "当前已配置的所有可用数据源及其类型列表".to_string(),
-            }
-        ];
+        let resources = vec![Resource {
+            uri: "db://dataSources".to_string(),
+            name: "dataSources".to_string(),
+            mime_type: "text/plain".to_string(),
+            description: "当前已配置的所有可用数据源及其类型列表".to_string(),
+        }];
         Ok(json!({ "resources": resources }))
     }
 
     async fn handle_resources_read(&self, params: Option<Value>) -> Result<Value> {
         let p = params.ok_or_else(|| anyhow::anyhow!("Missing params"))?;
-        let uri = p.get("uri").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("Missing parameter 'uri'"))?;
+        let uri = p
+            .get("uri")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing parameter 'uri'"))?;
 
         if uri == "db://dataSources" {
             let types = self.registry.get_datasource_types();
@@ -679,8 +804,10 @@ impl McpServer {
                     let nullable_str = if col.nullable { "YES" } else { "NO" };
                     let pk_str = if col.primary_key { "YES" } else { "NO" };
                     let def_val = col.default_value.as_deref().unwrap_or("NULL");
-                    sb.push_str(&format!("| {} | {} | {} | {} | {} | {} |\n",
-                        col.name, col.type_name, nullable_str, def_val, pk_str, col.comment));
+                    sb.push_str(&format!(
+                        "| {} | {} | {} | {} | {} | {} |\n",
+                        col.name, col.type_name, nullable_str, def_val, pk_str, col.comment
+                    ));
                 }
 
                 return Ok(json!({
@@ -708,26 +835,50 @@ impl McpServer {
 
     async fn handle_prompts_get(&self, params: Option<Value>) -> Result<Value> {
         let p = params.ok_or_else(|| anyhow::anyhow!("Missing params"))?;
-        let name = p.get("name").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("Missing parameter 'name'"))?;
-        let arguments = p.get("arguments").ok_or_else(|| anyhow::anyhow!("Missing parameter 'arguments'"))?;
+        let name = p
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing parameter 'name'"))?;
+        let arguments = p
+            .get("arguments")
+            .ok_or_else(|| anyhow::anyhow!("Missing parameter 'arguments'"))?;
 
         if name == "query_builder" {
-            let ds = arguments.get("dataSource").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("Missing argument 'dataSource'"))?;
-            let desc = arguments.get("description").and_then(|v| v.as_str()).ok_or_else(|| anyhow::anyhow!("Missing argument 'description'"))?;
+            let ds = arguments
+                .get("dataSource")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing argument 'dataSource'"))?;
+            let desc = arguments
+                .get("description")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Missing argument 'description'"))?;
 
             let mut schema_ctx = String::new();
             if let Ok(conn) = self.registry.get_connector(ds) {
                 if let Ok(tables) = conn.list_tables(None).await {
                     schema_ctx.push_str(&format!("目标数据源 [{}] 中可用的表列表如下：\n", ds));
                     for t in tables {
-                        let comment = if t.comment.is_empty() { "无" } else { &t.comment };
-                        schema_ctx.push_str(&format!("- 表名: `{}` | 类型: {} | 注释: {}\n", t.name, t.table_type, comment));
+                        let comment = if t.comment.is_empty() {
+                            "无"
+                        } else {
+                            &t.comment
+                        };
+                        schema_ctx.push_str(&format!(
+                            "- 表名: `{}` | 类型: {} | 注释: {}\n",
+                            t.name, t.table_type, comment
+                        ));
                     }
                 } else {
-                    schema_ctx.push_str(&format!("无法获取数据源 [{}] 的表列表元数据，请仅根据通用 SQL 生成。\n", ds));
+                    schema_ctx.push_str(&format!(
+                        "无法获取数据源 [{}] 的表列表元数据，请仅根据通用 SQL 生成。\n",
+                        ds
+                    ));
                 }
             } else {
-                schema_ctx.push_str(&format!("无法获取数据源 [{}] 的表列表元数据，请仅根据通用 SQL 生成。\n", ds));
+                schema_ctx.push_str(&format!(
+                    "无法获取数据源 [{}] 的表列表元数据，请仅根据通用 SQL 生成。\n",
+                    ds
+                ));
             }
 
             let system_instruction = format!(
