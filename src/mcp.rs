@@ -1,5 +1,3 @@
-#![allow(clippy::collapsible_if)]
-
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -526,16 +524,14 @@ impl McpServer {
                         .map(|s| s.to_string());
 
                     let mut properties = None;
-                    if let Some(props_val) = args.get("properties") {
-                        if let Some(obj) = props_val.as_object() {
-                            let mut map = HashMap::new();
-                            for (k, v) in obj {
-                                if let Some(s) = v.as_str() {
-                                    map.insert(k.clone(), s.to_string());
-                                }
+                    if let Some(obj) = args.get("properties").and_then(|v| v.as_object()) {
+                        let mut map = HashMap::new();
+                        for (k, v) in obj {
+                            if let Some(s) = v.as_str() {
+                                map.insert(k.clone(), s.to_string());
                             }
-                            properties = Some(map);
                         }
+                        properties = Some(map);
                     }
 
                     let ds_cfg = crate::config::DataSourceConfig {

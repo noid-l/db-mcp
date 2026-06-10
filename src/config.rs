@@ -1,4 +1,4 @@
-#![allow(clippy::collapsible_if)]
+
 
 use regex::Regex;
 use serde::Deserialize;
@@ -126,10 +126,8 @@ pub fn convert_to_dsn(cfg: &DataSourceConfig) -> Result<String, anyhow::Error> {
                 "mysql://{}:{}@{}:{}/{}",
                 username, password, host, port, database
             );
-            if let Some(ref props) = cfg.properties {
-                if !props.is_empty() {
-                    dsn = format!("{}?{}", dsn, build_query_string(props));
-                }
+            if let Some(props) = cfg.properties.as_ref().filter(|p| !p.is_empty()) {
+                dsn = format!("{}?{}", dsn, build_query_string(props));
             }
             Ok(dsn)
         }
@@ -185,10 +183,8 @@ pub fn convert_to_dsn(cfg: &DataSourceConfig) -> Result<String, anyhow::Error> {
                 "mssql://{}:{}@{}:{}/{}",
                 username, password, host, port, database
             );
-            if let Some(ref props) = cfg.properties {
-                if !props.is_empty() {
-                    dsn = format!("{}?{}", dsn, build_query_string(props));
-                }
+            if let Some(props) = cfg.properties.as_ref().filter(|p| !p.is_empty()) {
+                dsn = format!("{}?{}", dsn, build_query_string(props));
             }
             Ok(dsn)
         }

@@ -1,5 +1,4 @@
-#![allow(clippy::collapsible_if)]
-#![allow(clippy::match_like_matches_macro)]
+
 
 use anyhow::Result;
 use serde::Serialize;
@@ -93,10 +92,10 @@ impl BaseConnector {
     }
 
     pub async fn test_connection(&self) -> bool {
-        match tokio::time::timeout(Duration::from_secs(2), self.pool.acquire()).await {
-            Ok(Ok(_conn)) => true,
-            _ => false,
-        }
+        matches!(
+            tokio::time::timeout(Duration::from_secs(2), self.pool.acquire()).await,
+            Ok(Ok(_conn))
+        )
     }
 
     pub fn get_version(&self) -> String {
@@ -115,10 +114,13 @@ impl BaseConnector {
         };
 
         if !query.is_empty() {
-            if let Ok(row) = sqlx::query(query).fetch_one(&self.pool).await {
-                if let Ok(name) = row.try_get::<String, _>(0) {
-                    return name;
-                }
+            let res = sqlx::query(query)
+                .fetch_one(&self.pool)
+                .await
+                .ok()
+                .and_then(|row| row.try_get::<String, _>(0).ok());
+            if let Some(name) = res {
+                return name;
             }
         }
 
@@ -559,10 +561,11 @@ impl BaseConnector {
                     is_view = row.try_get(0).unwrap_or(false);
                 }
                 if is_view {
-                    if let Ok(row) = sqlx::query("SELECT pg_get_viewdef(c.oid) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2")
+                    let query_result = sqlx::query("SELECT pg_get_viewdef(c.oid) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = $1 AND c.relname = $2")
                         .bind(&db)
                         .bind(table)
-                        .fetch_one(&self.pool).await {
+                        .fetch_one(&self.pool).await;
+                    if let Ok(row) = query_result {
                         let view_def: String = row.try_get(0)?;
                         return Ok(format!("CREATE VIEW \"{}\".\"{}\" AS\n{}", db, table, view_def));
                     }
@@ -737,12 +740,10 @@ impl BaseConnector {
         table: &str,
         where_clause: Option<String>,
     ) -> Result<i64> {
-        if let Some(ref w) = where_clause {
-            if crate::config::contains_subquery(w) {
-                return Err(anyhow::anyhow!(
-                    "Subqueries are not allowed in count_rows filter"
-                ));
-            }
+        if where_clause.as_ref().is_some_and(|w| crate::config::contains_subquery(w)) {
+            return Err(anyhow::anyhow!(
+                "Subqueries are not allowed in count_rows filter"
+            ));
         }
 
         let db = match database {
@@ -758,10 +759,8 @@ impl BaseConnector {
         };
 
         let mut sql = format!("SELECT COUNT(*) FROM {}", table_name);
-        if let Some(ref w) = where_clause {
-            if !w.trim().is_empty() {
-                sql = format!("{} WHERE {}", sql, w);
-            }
+        if let Some(w) = where_clause.as_ref().filter(|w| !w.trim().is_empty()) {
+            sql = format!("{} WHERE {}", sql, w);
         }
 
         // 只读校验
