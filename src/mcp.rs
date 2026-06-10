@@ -183,6 +183,22 @@ impl McpServer {
         }
     }
 
+    fn datasource_only_schema(&self) -> InputSchema {
+        let mut map = HashMap::new();
+        map.insert(
+            "dataSource".to_string(),
+            Property {
+                prop_type: "string".to_string(),
+                description: "数据源名称".to_string(),
+            },
+        );
+        InputSchema {
+            schema_type: "object".to_string(),
+            properties: map,
+            required: vec!["dataSource".to_string()],
+        }
+    }
+
     fn get_table_and_db<'a>(&self, args: &'a Value) -> Result<(&'a str, Option<String>)> {
         let table = args
             .get("table")
@@ -296,41 +312,17 @@ impl McpServer {
             Tool {
                 name: "test_connection".to_string(),
                 description: "测试指定数据源的物理连接是否畅通。可以用在开始做一系列查询前确认数据库是否可以正常连接。".to_string(),
-                input_schema: InputSchema {
-                    schema_type: "object".to_string(),
-                    properties: {
-                        let mut map = HashMap::new();
-                        map.insert("dataSource".to_string(), Property { prop_type: "string".to_string(), description: "数据源名称".to_string() });
-                        map
-                    },
-                    required: vec!["dataSource".to_string()],
-                },
+                input_schema: self.datasource_only_schema(),
             },
             Tool {
                 name: "get_datasource_info".to_string(),
                 description: "获取指定数据源数据库的版本等物理属性信息。".to_string(),
-                input_schema: InputSchema {
-                    schema_type: "object".to_string(),
-                    properties: {
-                        let mut map = HashMap::new();
-                        map.insert("dataSource".to_string(), Property { prop_type: "string".to_string(), description: "数据源名称".to_string() });
-                        map
-                    },
-                    required: vec!["dataSource".to_string()],
-                },
+                input_schema: self.datasource_only_schema(),
             },
             Tool {
                 name: "list_databases".to_string(),
                 description: "列出指定数据源下的所有数据库/Schema 列表。".to_string(),
-                input_schema: InputSchema {
-                    schema_type: "object".to_string(),
-                    properties: {
-                        let mut map = HashMap::new();
-                        map.insert("dataSource".to_string(), Property { prop_type: "string".to_string(), description: "数据源名称".to_string() });
-                        map
-                    },
-                    required: vec!["dataSource".to_string()],
-                },
+                input_schema: self.datasource_only_schema(),
             },
             Tool {
                 name: "list_tables".to_string(),
