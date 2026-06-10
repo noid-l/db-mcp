@@ -149,6 +149,40 @@ impl McpServer {
         }
     }
 
+    fn base_table_properties(&self) -> HashMap<String, Property> {
+        let mut map = HashMap::new();
+        map.insert(
+            "dataSource".to_string(),
+            Property {
+                prop_type: "string".to_string(),
+                description: "数据源名称".to_string(),
+            },
+        );
+        map.insert(
+            "table".to_string(),
+            Property {
+                prop_type: "string".to_string(),
+                description: "表名称".to_string(),
+            },
+        );
+        map.insert(
+            "database".to_string(),
+            Property {
+                prop_type: "string".to_string(),
+                description: "数据库/Schema 名称，可选".to_string(),
+            },
+        );
+        map
+    }
+
+    fn table_schema(&self) -> InputSchema {
+        InputSchema {
+            schema_type: "object".to_string(),
+            properties: self.base_table_properties(),
+            required: vec!["dataSource".to_string(), "table".to_string()],
+        }
+    }
+
     fn get_table_and_db<'a>(&self, args: &'a Value) -> Result<(&'a str, Option<String>)> {
         let table = args
             .get("table")
@@ -316,62 +350,22 @@ impl McpServer {
             Tool {
                 name: "describe_table".to_string(),
                 description: "获取指定表的字段结构，包括列名、类型、是否为空、默认值、是否为主键和列注释。".to_string(),
-                input_schema: InputSchema {
-                    schema_type: "object".to_string(),
-                    properties: {
-                        let mut map = HashMap::new();
-                        map.insert("dataSource".to_string(), Property { prop_type: "string".to_string(), description: "数据源名称".to_string() });
-                        map.insert("table".to_string(), Property { prop_type: "string".to_string(), description: "表名称".to_string() });
-                        map.insert("database".to_string(), Property { prop_type: "string".to_string(), description: "数据库/Schema 名称，可选".to_string() });
-                        map
-                    },
-                    required: vec!["dataSource".to_string(), "table".to_string()],
-                },
+                input_schema: self.table_schema(),
             },
             Tool {
                 name: "list_indexes".to_string(),
                 description: "列出指定表的索引信息，包括索引名称、包含的列名、是否唯一等属性。".to_string(),
-                input_schema: InputSchema {
-                    schema_type: "object".to_string(),
-                    properties: {
-                        let mut map = HashMap::new();
-                        map.insert("dataSource".to_string(), Property { prop_type: "string".to_string(), description: "数据源名称".to_string() });
-                        map.insert("table".to_string(), Property { prop_type: "string".to_string(), description: "表名称".to_string() });
-                        map.insert("database".to_string(), Property { prop_type: "string".to_string(), description: "数据库/Schema 名称，可选".to_string() });
-                        map
-                    },
-                    required: vec!["dataSource".to_string(), "table".to_string()],
-                },
+                input_schema: self.table_schema(),
             },
             Tool {
                 name: "get_foreign_keys".to_string(),
                 description: "获取指定表的外键关联引用关系，展示主键表、主键列、外键列等关联细节。".to_string(),
-                input_schema: InputSchema {
-                    schema_type: "object".to_string(),
-                    properties: {
-                        let mut map = HashMap::new();
-                        map.insert("dataSource".to_string(), Property { prop_type: "string".to_string(), description: "数据源名称".to_string() });
-                        map.insert("table".to_string(), Property { prop_type: "string".to_string(), description: "表名称".to_string() });
-                        map.insert("database".to_string(), Property { prop_type: "string".to_string(), description: "数据库/Schema 名称，可选".to_string() });
-                        map
-                    },
-                    required: vec!["dataSource".to_string(), "table".to_string()],
-                },
+                input_schema: self.table_schema(),
             },
             Tool {
                 name: "get_table_ddl".to_string(),
                 description: "获取指定表或视图的 DDL 建表/建视图语句（方言级别自动适配，不支持的数据库会平滑降级）。".to_string(),
-                input_schema: InputSchema {
-                    schema_type: "object".to_string(),
-                    properties: {
-                        let mut map = HashMap::new();
-                        map.insert("dataSource".to_string(), Property { prop_type: "string".to_string(), description: "数据源名称".to_string() });
-                        map.insert("table".to_string(), Property { prop_type: "string".to_string(), description: "表名称".to_string() });
-                        map.insert("database".to_string(), Property { prop_type: "string".to_string(), description: "数据库/Schema 名称，可选".to_string() });
-                        map
-                    },
-                    required: vec!["dataSource".to_string(), "table".to_string()],
-                },
+                input_schema: self.table_schema(),
             },
             Tool {
                 name: "execute_query".to_string(),
@@ -408,11 +402,8 @@ impl McpServer {
                 input_schema: InputSchema {
                     schema_type: "object".to_string(),
                     properties: {
-                        let mut map = HashMap::new();
-                        map.insert("dataSource".to_string(), Property { prop_type: "string".to_string(), description: "数据源名称".to_string() });
-                        map.insert("table".to_string(), Property { prop_type: "string".to_string(), description: "表名称".to_string() });
+                        let mut map = self.base_table_properties();
                         map.insert("where".to_string(), Property { prop_type: "string".to_string(), description: "过滤条件 (例如 age > 18，不需要带 WHERE 关键字)".to_string() });
-                        map.insert("database".to_string(), Property { prop_type: "string".to_string(), description: "数据库/Schema 名称，可选".to_string() });
                         map
                     },
                     required: vec!["dataSource".to_string(), "table".to_string()],
@@ -424,11 +415,8 @@ impl McpServer {
                 input_schema: InputSchema {
                     schema_type: "object".to_string(),
                     properties: {
-                        let mut map = HashMap::new();
-                        map.insert("dataSource".to_string(), Property { prop_type: "string".to_string(), description: "数据源名称".to_string() });
-                        map.insert("table".to_string(), Property { prop_type: "string".to_string(), description: "表名称".to_string() });
+                        let mut map = self.base_table_properties();
                         map.insert("limit".to_string(), Property { prop_type: "integer".to_string(), description: "返回的最大样本数，默认 10 行，最大 100 行".to_string() });
-                        map.insert("database".to_string(), Property { prop_type: "string".to_string(), description: "数据库/Schema 名称，可选".to_string() });
                         map
                     },
                     required: vec!["dataSource".to_string(), "table".to_string()],
