@@ -88,6 +88,14 @@ pub fn load_config<P: AsRef<Path>>(path: P) -> Result<Config, Box<dyn std::error
     Ok(config)
 }
 
+fn build_query_string(properties: &HashMap<String, String>) -> String {
+    let parts: Vec<String> = properties
+        .iter()
+        .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
+        .collect();
+    parts.join("&")
+}
+
 // 将 JDBC URL 或者是 host/port/database 配置转为 sqlx 支持的连接串
 pub fn convert_to_dsn(cfg: &DataSourceConfig) -> Result<String, anyhow::Error> {
     let db_type = cfg.db_type.to_uppercase();
@@ -120,13 +128,7 @@ pub fn convert_to_dsn(cfg: &DataSourceConfig) -> Result<String, anyhow::Error> {
             );
             if let Some(ref props) = cfg.properties {
                 if !props.is_empty() {
-                    let parts: Vec<String> = props
-                        .iter()
-                        .map(|(k, v)| {
-                            format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                        })
-                        .collect();
-                    dsn = format!("{}?{}", dsn, parts.join("&"));
+                    dsn = format!("{}?{}", dsn, build_query_string(props));
                 }
             }
             Ok(dsn)
@@ -158,15 +160,13 @@ pub fn convert_to_dsn(cfg: &DataSourceConfig) -> Result<String, anyhow::Error> {
                 sslmode
             );
             if let Some(ref props) = cfg.properties {
-                for (k, v) in props {
-                    if k != "sslmode" && k != "ssl" {
-                        dsn = format!(
-                            "{}&{}={}",
-                            dsn,
-                            urlencoding::encode(k),
-                            urlencoding::encode(v)
-                        );
-                    }
+                let filtered: HashMap<String, String> = props
+                    .iter()
+                    .filter(|&(k, _)| k != "sslmode" && k != "ssl")
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+                if !filtered.is_empty() {
+                    dsn = format!("{}&{}", dsn, build_query_string(&filtered));
                 }
             }
             Ok(dsn)
@@ -187,13 +187,7 @@ pub fn convert_to_dsn(cfg: &DataSourceConfig) -> Result<String, anyhow::Error> {
             );
             if let Some(ref props) = cfg.properties {
                 if !props.is_empty() {
-                    let parts: Vec<String> = props
-                        .iter()
-                        .map(|(k, v)| {
-                            format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))
-                        })
-                        .collect();
-                    dsn = format!("{}?{}", dsn, parts.join("&"));
+                    dsn = format!("{}?{}", dsn, build_query_string(props));
                 }
             }
             Ok(dsn)
