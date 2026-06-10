@@ -73,7 +73,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if connected {
                             eprintln!("数据源 '{}' 连接还原成功！", name);
                         } else {
-                            eprintln!("警告: 数据源 '{}' 还原失败，物理连接不通，但仍将被注册。", name);
+                            eprintln!(
+                                "警告: 数据源 '{}' 还原失败，物理连接不通，但仍将被注册。",
+                                name
+                            );
                         }
                         registry.register(name, connector);
                     }
@@ -118,7 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         eprintln!("解析 JSON-RPC 请求失败: '{}', 错误: {}", trimmed, e);
                         // 返回一个 Parse error
                         let resp = mcp::JsonRpcResponse {
-                            jsonrpc: "2.0".to_string(),
+                            json_rpc: "2.0".to_string(),
                             id: serde_json::Value::Null,
                             result: None,
                             error: Some(mcp::JsonRpcError {

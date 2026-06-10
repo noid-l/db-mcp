@@ -1,9 +1,9 @@
+use crate::db::{ColumnMetadata, DbDialect, TableMetadata};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use sqlx::{Row, any::Any};
 use std::collections::HashMap;
-use crate::db::{ColumnMetadata, TableMetadata, DbDialect};
 
 pub struct MySqlDialect;
 
@@ -36,7 +36,11 @@ impl DbDialect for MySqlDialect {
         Ok(dbs)
     }
 
-    async fn list_tables(&self, pool: &sqlx::Pool<Any>, database: &str) -> Result<Vec<TableMetadata>> {
+    async fn list_tables(
+        &self,
+        pool: &sqlx::Pool<Any>,
+        database: &str,
+    ) -> Result<Vec<TableMetadata>> {
         let rows = sqlx::query("SELECT TABLE_NAME, TABLE_TYPE, COALESCE(TABLE_COMMENT, '') FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?")
             .bind(database)
             .fetch_all(pool).await?;
@@ -56,7 +60,12 @@ impl DbDialect for MySqlDialect {
         Ok(tables)
     }
 
-    async fn describe_table(&self, pool: &sqlx::Pool<Any>, database: &str, table: &str) -> Result<Vec<ColumnMetadata>> {
+    async fn describe_table(
+        &self,
+        pool: &sqlx::Pool<Any>,
+        database: &str,
+        table: &str,
+    ) -> Result<Vec<ColumnMetadata>> {
         let rows = sqlx::query("SELECT COLUMN_NAME, DATA_TYPE, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_COMMENT, CASE WHEN COLUMN_KEY = 'PRI' THEN 1 ELSE 0 END AS IS_PK FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION")
             .bind(database)
             .bind(table)
@@ -85,7 +94,12 @@ impl DbDialect for MySqlDialect {
         Ok(columns)
     }
 
-    async fn list_indexes(&self, pool: &sqlx::Pool<Any>, database: &str, table: &str) -> Result<Vec<HashMap<String, Value>>> {
+    async fn list_indexes(
+        &self,
+        pool: &sqlx::Pool<Any>,
+        database: &str,
+        table: &str,
+    ) -> Result<Vec<HashMap<String, Value>>> {
         let rows = sqlx::query("SELECT INDEX_NAME, COLUMN_NAME, NON_UNIQUE, INDEX_TYPE, SEQ_IN_INDEX FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?")
             .bind(database)
             .bind(table)
@@ -108,7 +122,12 @@ impl DbDialect for MySqlDialect {
         Ok(indexes)
     }
 
-    async fn get_imported_keys(&self, pool: &sqlx::Pool<Any>, database: &str, table: &str) -> Result<Vec<HashMap<String, Value>>> {
+    async fn get_imported_keys(
+        &self,
+        pool: &sqlx::Pool<Any>,
+        database: &str,
+        table: &str,
+    ) -> Result<Vec<HashMap<String, Value>>> {
         let rows = sqlx::query("SELECT REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME, TABLE_NAME, COLUMN_NAME, ORDINAL_POSITION, CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND REFERENCED_TABLE_NAME IS NOT NULL")
             .bind(database)
             .bind(table)
@@ -133,7 +152,26 @@ impl DbDialect for MySqlDialect {
         Ok(fkeys)
     }
 
-    async fn get_table_ddl(&self, pool: &sqlx::Pool<Any>, database: &str, table: &str) -> Result<String> {
+    async fn get_schema_fingerprint(
+        &self,
+        pool: &sqlx::Pool<Any>,
+        database: &str,
+    ) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT COUNT(*), SUM(LENGTH(TABLE_NAME)) FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?")
+            .bind(database)
+            .fetch_one(pool)
+            .await?;
+        let count: i64 = row.try_get(0)?;
+        let len_sum: Option<f64> = row.try_get(1).ok().flatten();
+        Ok(Some(format!("{}-{}", count, len_sum.unwrap_or(0.0) as i64)))
+    }
+
+    async fn get_table_ddl(
+        &self,
+        pool: &sqlx::Pool<Any>,
+        database: &str,
+        table: &str,
+    ) -> Result<String> {
         let q = format!("SHOW CREATE TABLE `{}`.`{}`", database, table);
         if let Ok(row) = sqlx::query(&q).fetch_one(pool).await {
             let sql: String = row.try_get(1)?;
@@ -143,15 +181,5 @@ impl DbDialect for MySqlDialect {
         let row = sqlx::query(&q_view).fetch_one(pool).await?;
         let sql: String = row.try_get(1)?;
         Ok(sql)
-    }
-
-    async fn get_schema_fingerprint(&self, pool: &sqlx::Pool<Any>, database: &str) -> Result<Option<String>> {
-        let row = sqlx::query("SELECT COUNT(*), SUM(LENGTH(TABLE_NAME)) FROM information_schema.TABLES WHERE TABLE_SCHEMA = ?")
-            .bind(database)
-            .fetch_one(pool)
-            .await?;
-        let count: i64 = row.try_get(0)?;
-        let len_sum: Option<f64> = row.try_get(1).ok().flatten();
-        Ok(Some(format!("{}-{}", count, len_sum.unwrap_or(0.0) as i64)))
     }
 }

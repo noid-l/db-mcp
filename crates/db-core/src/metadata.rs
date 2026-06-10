@@ -1,7 +1,7 @@
-use sqlx::{SqlitePool, Row};
 use crate::config::DataSourceConfig;
-use crate::db::{TableMetadata, ColumnMetadata};
+use crate::db::{ColumnMetadata, TableMetadata};
 use anyhow::Result;
+use sqlx::{Row, SqlitePool};
 
 pub struct MetadataStore {
     pool: SqlitePool,
@@ -10,22 +10,22 @@ pub struct MetadataStore {
 impl MetadataStore {
     /// 初始化连接并自动建表
     pub async fn new(db_path: &str) -> Result<Self> {
-        if db_path != ":memory:" {
-            if let Some(parent) = std::path::Path::new(db_path).parent() {
-                std::fs::create_dir_all(parent)?;
-            }
+        if db_path != ":memory:"
+            && let Some(parent) = std::path::Path::new(db_path).parent()
+        {
+            std::fs::create_dir_all(parent)?;
         }
-        
+
         let connection_str = format!("sqlite://{}", db_path);
         let pool = SqlitePool::connect(&connection_str).await?;
-        
+
         // 自动初始化元数据表
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS data_sources (
                 name TEXT PRIMARY KEY,
                 db_type TEXT NOT NULL,
                 config_json TEXT NOT NULL
-            )"
+            )",
         )
         .execute(&pool)
         .await?;
@@ -35,7 +35,7 @@ impl MetadataStore {
                 datasource_name TEXT PRIMARY KEY,
                 last_updated_at INTEGER NOT NULL,
                 schema_fingerprint TEXT
-            )"
+            )",
         )
         .execute(&pool)
         .await?;
@@ -47,7 +47,7 @@ impl MetadataStore {
                 table_type TEXT NOT NULL,
                 comment TEXT NOT NULL,
                 PRIMARY KEY (datasource_name, table_name)
-            )"
+            )",
         )
         .execute(&pool)
         .await?;
@@ -63,7 +63,7 @@ impl MetadataStore {
                 primary_key INTEGER NOT NULL,
                 comment TEXT NOT NULL,
                 PRIMARY KEY (datasource_name, table_name, column_name)
-            )"
+            )",
         )
         .execute(&pool)
         .await?;
@@ -72,14 +72,19 @@ impl MetadataStore {
     }
 
     /// 缓存数据源配置到 SQLite (如果已存在则执行更新)
-    pub async fn save_data_source(&self, name: &str, db_type: &str, config: &DataSourceConfig) -> Result<()> {
+    pub async fn save_data_source(
+        &self,
+        name: &str,
+        db_type: &str,
+        config: &DataSourceConfig,
+    ) -> Result<()> {
         let config_json = serde_json::to_string(config)?;
         sqlx::query(
             "INSERT INTO data_sources (name, db_type, config_json)
              VALUES (?, ?, ?)
              ON CONFLICT(name) DO UPDATE SET
                 db_type = excluded.db_type,
-                config_json = excluded.config_json"
+                config_json = excluded.config_json",
         )
         .bind(name)
         .bind(db_type)
@@ -103,7 +108,7 @@ impl MetadataStore {
         let rows = sqlx::query("SELECT name, db_type, config_json FROM data_sources")
             .fetch_all(&self.pool)
             .await?;
-        
+
         let mut list = Vec::new();
         for row in rows {
             let name: String = row.try_get("name")?;
@@ -116,14 +121,17 @@ impl MetadataStore {
     }
 
     /// 获取数据源的 Schema 缓存状态 (最后更新时间及指纹)
-    pub async fn get_cache_status(&self, datasource_name: &str) -> Result<Option<(i64, Option<String>)>> {
+    pub async fn get_cache_status(
+        &self,
+        datasource_name: &str,
+    ) -> Result<Option<(i64, Option<String>)>> {
         let row = sqlx::query(
             "SELECT last_updated_at, schema_fingerprint FROM schema_cache_meta WHERE datasource_name = ?"
         )
         .bind(datasource_name)
         .fetch_optional(&self.pool)
         .await?;
-        
+
         if let Some(r) = row {
             let last_updated: i64 = r.try_get(0)?;
             let fingerprint: Option<String> = r.try_get(1)?;
@@ -142,24 +150,24 @@ impl MetadataStore {
         fingerprint: Option<&str>,
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
-        
+
         // 删去旧表
         sqlx::query("DELETE FROM tables_cache WHERE datasource_name = ?")
             .bind(datasource_name)
             .execute(&mut *tx)
             .await?;
-            
+
         // 删去旧列
         sqlx::query("DELETE FROM columns_cache WHERE datasource_name = ?")
             .bind(datasource_name)
             .execute(&mut *tx)
             .await?;
-            
+
         // 插入新表
         for t in tables {
             sqlx::query(
                 "INSERT INTO tables_cache (datasource_name, table_name, table_type, comment)
-                 VALUES (?, ?, ?, ?)"
+                 VALUES (?, ?, ?, ?)",
             )
             .bind(datasource_name)
             .bind(&t.name)
@@ -168,7 +176,7 @@ impl MetadataStore {
             .execute(&mut *tx)
             .await?;
         }
-        
+
         // 插入新列
         for (table_name, cols) in columns {
             for col in cols {
@@ -188,7 +196,7 @@ impl MetadataStore {
                 .await?;
             }
         }
-        
+
         // 更新 meta
         let now = chrono::Utc::now().timestamp();
         sqlx::query(
@@ -196,37 +204,40 @@ impl MetadataStore {
              VALUES (?, ?, ?)
              ON CONFLICT(datasource_name) DO UPDATE SET
                 last_updated_at = excluded.last_updated_at,
-                schema_fingerprint = excluded.schema_fingerprint"
+                schema_fingerprint = excluded.schema_fingerprint",
         )
         .bind(datasource_name)
         .bind(now)
         .bind(fingerprint)
         .execute(&mut *tx)
         .await?;
-        
+
         tx.commit().await?;
         Ok(())
     }
 
     /// 获取缓存的表信息
-    pub async fn get_cached_tables(&self, datasource_name: &str) -> Result<Option<Vec<TableMetadata>>> {
+    pub async fn get_cached_tables(
+        &self,
+        datasource_name: &str,
+    ) -> Result<Option<Vec<TableMetadata>>> {
         let meta_exists = sqlx::query("SELECT 1 FROM schema_cache_meta WHERE datasource_name = ?")
             .bind(datasource_name)
             .fetch_optional(&self.pool)
             .await?
             .is_some();
-            
+
         if !meta_exists {
             return Ok(None);
         }
-        
+
         let rows = sqlx::query(
-            "SELECT table_name, table_type, comment FROM tables_cache WHERE datasource_name = ?"
+            "SELECT table_name, table_type, comment FROM tables_cache WHERE datasource_name = ?",
         )
         .bind(datasource_name)
         .fetch_all(&self.pool)
         .await?;
-            
+
         let mut list = Vec::new();
         for row in rows {
             let name: String = row.try_get(0)?;
@@ -244,27 +255,31 @@ impl MetadataStore {
     }
 
     /// 获取指定表下的缓存字段信息
-    pub async fn get_cached_columns(&self, datasource_name: &str, table_name: &str) -> Result<Option<Vec<ColumnMetadata>>> {
+    pub async fn get_cached_columns(
+        &self,
+        datasource_name: &str,
+        table_name: &str,
+    ) -> Result<Option<Vec<ColumnMetadata>>> {
         let meta_exists = sqlx::query("SELECT 1 FROM schema_cache_meta WHERE datasource_name = ?")
             .bind(datasource_name)
             .fetch_optional(&self.pool)
             .await?
             .is_some();
-            
+
         if !meta_exists {
             return Ok(None);
         }
-        
+
         let rows = sqlx::query(
             "SELECT column_name, type_name, nullable, default_value, primary_key, comment 
              FROM columns_cache 
-             WHERE datasource_name = ? AND table_name = ?"
+             WHERE datasource_name = ? AND table_name = ?",
         )
         .bind(datasource_name)
         .bind(table_name)
         .fetch_all(&self.pool)
         .await?;
-        
+
         let mut list = Vec::new();
         for row in rows {
             let column_name: String = row.try_get(0)?;
@@ -273,7 +288,7 @@ impl MetadataStore {
             let default_value: Option<String> = row.try_get(3)?;
             let primary_key: i64 = row.try_get(4)?;
             let comment: String = row.try_get(5)?;
-            
+
             list.push(ColumnMetadata {
                 name: column_name,
                 sql_type: 0,
@@ -290,45 +305,57 @@ impl MetadataStore {
     }
 
     /// 全文模糊检索字段或表
-    pub async fn search_cached_schema(&self, datasource_name: &str, query: &str) -> Result<Vec<(String, String, String)>> {
+    pub async fn search_cached_schema(
+        &self,
+        datasource_name: &str,
+        query: &str,
+    ) -> Result<Vec<(String, String, String)>> {
         let search_pattern = format!("%{}%", query);
-        
+
         // 1. 搜表名或表注释
         let table_rows = sqlx::query(
             "SELECT table_name, comment FROM tables_cache 
-             WHERE datasource_name = ? AND (table_name LIKE ? OR comment LIKE ?)"
+             WHERE datasource_name = ? AND (table_name LIKE ? OR comment LIKE ?)",
         )
         .bind(datasource_name)
         .bind(&search_pattern)
         .bind(&search_pattern)
         .fetch_all(&self.pool)
         .await?;
-        
+
         let mut results = Vec::new();
         for row in table_rows {
             let table_name: String = row.try_get(0)?;
             let comment: String = row.try_get(1)?;
-            results.push((table_name, "".to_string(), format!("Table match: {}", comment)));
+            results.push((
+                table_name,
+                "".to_string(),
+                format!("Table match: {}", comment),
+            ));
         }
-        
+
         // 2. 搜列名或列注释
         let col_rows = sqlx::query(
             "SELECT table_name, column_name, comment FROM columns_cache 
-             WHERE datasource_name = ? AND (column_name LIKE ? OR comment LIKE ?)"
+             WHERE datasource_name = ? AND (column_name LIKE ? OR comment LIKE ?)",
         )
         .bind(datasource_name)
         .bind(&search_pattern)
         .bind(&search_pattern)
         .fetch_all(&self.pool)
         .await?;
-        
+
         for row in col_rows {
             let table_name: String = row.try_get(0)?;
             let column_name: String = row.try_get(1)?;
             let comment: String = row.try_get(2)?;
-            results.push((table_name, column_name, format!("Column match: {}", comment)));
+            results.push((
+                table_name,
+                column_name,
+                format!("Column match: {}", comment),
+            ));
         }
-        
+
         Ok(results)
     }
 
@@ -359,7 +386,7 @@ mod tests {
     #[tokio::test]
     async fn test_metadata_store() {
         let store = MetadataStore::new(":memory:").await.unwrap();
-        
+
         let config = DataSourceConfig {
             db_type: "SQLITE".to_string(),
             jdbc_url: None,
@@ -373,7 +400,10 @@ mod tests {
         };
 
         // 1. 保存
-        store.save_data_source("test_ds", "SQLITE", &config).await.unwrap();
+        store
+            .save_data_source("test_ds", "SQLITE", &config)
+            .await
+            .unwrap();
 
         // 2. 列表查询
         let list = store.list_data_sources().await.unwrap();
@@ -391,7 +421,7 @@ mod tests {
     #[tokio::test]
     async fn test_schema_cache() {
         let store = MetadataStore::new(":memory:").await.unwrap();
-        
+
         let tables = vec![TableMetadata {
             name: "users".to_string(),
             catalog: None,
@@ -399,7 +429,7 @@ mod tests {
             table_type: "TABLE".to_string(),
             comment: "用户表".to_string(),
         }];
-        
+
         let cols = vec![
             ColumnMetadata {
                 name: "id".to_string(),
@@ -422,35 +452,42 @@ mod tests {
                 default_value: None,
                 primary_key: false,
                 comment: "姓名".to_string(),
-            }
+            },
         ];
-        
+
         let columns = vec![("users".to_string(), cols)];
-        
+
         // 更新缓存
-        store.update_schema_cache("ds1", &tables, &columns, Some("v1")).await.unwrap();
-        
+        store
+            .update_schema_cache("ds1", &tables, &columns, Some("v1"))
+            .await
+            .unwrap();
+
         // 状态检查
         let status = store.get_cache_status("ds1").await.unwrap().unwrap();
         assert_eq!(status.1.as_deref(), Some("v1"));
-        
+
         // 获取缓存表
         let cached_tables = store.get_cached_tables("ds1").await.unwrap().unwrap();
         assert_eq!(cached_tables.len(), 1);
         assert_eq!(cached_tables[0].name, "users");
-        
+
         // 获取缓存字段
-        let cached_cols = store.get_cached_columns("ds1", "users").await.unwrap().unwrap();
+        let cached_cols = store
+            .get_cached_columns("ds1", "users")
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(cached_cols.len(), 2);
         assert_eq!(cached_cols[1].name, "name");
         assert_eq!(cached_cols[1].comment, "姓名");
-        
+
         // 搜索测试
         let search_res = store.search_cached_schema("ds1", "姓名").await.unwrap();
         assert_eq!(search_res.len(), 1);
         assert_eq!(search_res[0].0, "users");
         assert_eq!(search_res[0].1, "name");
-        
+
         // 失效缓存
         store.invalidate_schema_cache("ds1").await.unwrap();
         let status = store.get_cache_status("ds1").await.unwrap();

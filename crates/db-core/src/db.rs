@@ -1,5 +1,3 @@
-
-
 use anyhow::Result;
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -298,7 +296,10 @@ impl BaseConnector {
         table: &str,
         where_clause: Option<String>,
     ) -> Result<i64> {
-        if where_clause.as_ref().is_some_and(|w| crate::config::contains_subquery(w)) {
+        if where_clause
+            .as_ref()
+            .is_some_and(|w| crate::config::contains_subquery(w))
+        {
             return Err(anyhow::anyhow!(
                 "Subqueries are not allowed in count_rows filter"
             ));
@@ -400,6 +401,12 @@ fn get_any_value(row: &sqlx::any::AnyRow, index: usize) -> Value {
 // 数据源注册管理器
 pub struct DataSourceRegistry {
     connectors: std::sync::RwLock<HashMap<String, std::sync::Arc<BaseConnector>>>,
+}
+
+impl Default for DataSourceRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DataSourceRegistry {

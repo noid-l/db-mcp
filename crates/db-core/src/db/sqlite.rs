@@ -1,9 +1,9 @@
+use crate::db::{ColumnMetadata, DbDialect, TableMetadata};
 use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use sqlx::{Row, any::Any};
 use std::collections::HashMap;
-use crate::db::{ColumnMetadata, TableMetadata, DbDialect};
 
 pub struct SqliteDialect;
 
@@ -25,7 +25,11 @@ impl DbDialect for SqliteDialect {
         Ok(vec!["main".to_string()])
     }
 
-    async fn list_tables(&self, pool: &sqlx::Pool<Any>, _database: &str) -> Result<Vec<TableMetadata>> {
+    async fn list_tables(
+        &self,
+        pool: &sqlx::Pool<Any>,
+        _database: &str,
+    ) -> Result<Vec<TableMetadata>> {
         let rows = sqlx::query("SELECT name, 'TABLE' as type FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' UNION ALL SELECT name, 'VIEW' as type FROM sqlite_master WHERE type='view'")
             .fetch_all(pool).await?;
         let mut tables = Vec::new();
@@ -43,7 +47,12 @@ impl DbDialect for SqliteDialect {
         Ok(tables)
     }
 
-    async fn describe_table(&self, pool: &sqlx::Pool<Any>, _database: &str, table: &str) -> Result<Vec<ColumnMetadata>> {
+    async fn describe_table(
+        &self,
+        pool: &sqlx::Pool<Any>,
+        _database: &str,
+        table: &str,
+    ) -> Result<Vec<ColumnMetadata>> {
         let rows = sqlx::query(&format!("PRAGMA table_info({})", table))
             .fetch_all(pool)
             .await?;
@@ -69,7 +78,12 @@ impl DbDialect for SqliteDialect {
         Ok(columns)
     }
 
-    async fn list_indexes(&self, pool: &sqlx::Pool<Any>, _database: &str, table: &str) -> Result<Vec<HashMap<String, Value>>> {
+    async fn list_indexes(
+        &self,
+        pool: &sqlx::Pool<Any>,
+        _database: &str,
+        table: &str,
+    ) -> Result<Vec<HashMap<String, Value>>> {
         let rows = sqlx::query(&format!("PRAGMA index_list({})", table))
             .fetch_all(pool)
             .await?;
@@ -99,7 +113,12 @@ impl DbDialect for SqliteDialect {
         Ok(indexes)
     }
 
-    async fn get_imported_keys(&self, pool: &sqlx::Pool<Any>, _database: &str, table: &str) -> Result<Vec<HashMap<String, Value>>> {
+    async fn get_imported_keys(
+        &self,
+        pool: &sqlx::Pool<Any>,
+        _database: &str,
+        table: &str,
+    ) -> Result<Vec<HashMap<String, Value>>> {
         let rows = sqlx::query(&format!("PRAGMA foreign_key_list({})", table))
             .fetch_all(pool)
             .await?;
@@ -122,7 +141,25 @@ impl DbDialect for SqliteDialect {
         Ok(fkeys)
     }
 
-    async fn get_table_ddl(&self, pool: &sqlx::Pool<Any>, _database: &str, table: &str) -> Result<String> {
+    async fn get_schema_fingerprint(
+        &self,
+        pool: &sqlx::Pool<Any>,
+        _database: &str,
+    ) -> Result<Option<String>> {
+        let row = sqlx::query("SELECT COUNT(*), SUM(LENGTH(sql)) FROM sqlite_master")
+            .fetch_one(pool)
+            .await?;
+        let count: i64 = row.try_get(0)?;
+        let len_sum: Option<i64> = row.try_get(1).ok().flatten();
+        Ok(Some(format!("{}-{}", count, len_sum.unwrap_or(0))))
+    }
+
+    async fn get_table_ddl(
+        &self,
+        pool: &sqlx::Pool<Any>,
+        _database: &str,
+        table: &str,
+    ) -> Result<String> {
         let row = sqlx::query(
             "SELECT sql FROM sqlite_master WHERE type IN ('table', 'view') AND name = ?",
         )
@@ -131,12 +168,5 @@ impl DbDialect for SqliteDialect {
         .await?;
         let sql: String = row.try_get(0)?;
         Ok(sql)
-    }
-
-    async fn get_schema_fingerprint(&self, pool: &sqlx::Pool<Any>, _database: &str) -> Result<Option<String>> {
-        let row = sqlx::query("SELECT COUNT(*), SUM(LENGTH(sql)) FROM sqlite_master").fetch_one(pool).await?;
-        let count: i64 = row.try_get(0)?;
-        let len_sum: Option<i64> = row.try_get(1).ok().flatten();
-        Ok(Some(format!("{}-{}", count, len_sum.unwrap_or(0))))
     }
 }
