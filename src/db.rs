@@ -650,7 +650,7 @@ impl BaseConnector {
 
         // 我们需要使用 sqlx::query 执行，并提取 metadata 及 row
         let rows = tokio::time::timeout(
-            std::time::Duration::from_secs(self.query_timeout),
+            Duration::from_secs(self.query_timeout),
             sqlx::query(&sql_to_execute).fetch_all(&self.pool),
         )
         .await

@@ -149,6 +149,40 @@ impl McpServer {
         }
     }
 
+    fn get_table_and_db<'a>(&self, args: &'a Value) -> Result<(&'a str, Option<String>)> {
+        let table = args
+            .get("table")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing table"))?;
+        let db = args
+            .get("database")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        Ok((table, db))
+    }
+
+    async fn execute_and_audit(
+        &self,
+        conn: &crate::db::BaseConnector,
+        ds: &str,
+        sql: &str,
+        limit: usize,
+    ) -> Result<String> {
+        let start = Instant::now();
+        let res = conn.execute_query(sql, limit).await;
+        let elapsed = start.elapsed().as_millis() as i64;
+
+        match &res {
+            Ok(qr) => {
+                self.audit(ds, sql, elapsed, qr.row_count, None);
+            }
+            Err(e) => {
+                self.audit(ds, sql, elapsed, 0, Some(e));
+            }
+        }
+        Ok(serde_json::to_string_pretty(&res?)?)
+    }
+
     pub async fn handle_request(&self, req: JsonRpcRequest) -> Option<JsonRpcResponse> {
         let id = req.id.unwrap_or(Value::Null);
 
@@ -604,53 +638,25 @@ impl McpServer {
                     Ok(serde_json::to_string_pretty(&tables)?)
                 }
                 "describe_table" => {
-                    let table = args
-                        .get("table")
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| anyhow::anyhow!("Missing table"))?;
-                    let db = args
-                        .get("database")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
+                    let (table, db) = self.get_table_and_db(args)?;
                     let conn = self.registry.get_connector(ds)?;
                     let cols = conn.describe_table(db, table).await?;
                     Ok(serde_json::to_string_pretty(&cols)?)
                 }
                 "list_indexes" => {
-                    let table = args
-                        .get("table")
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| anyhow::anyhow!("Missing table"))?;
-                    let db = args
-                        .get("database")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
+                    let (table, db) = self.get_table_and_db(args)?;
                     let conn = self.registry.get_connector(ds)?;
                     let idxs = conn.list_indexes(db, table).await?;
                     Ok(serde_json::to_string_pretty(&idxs)?)
                 }
                 "get_foreign_keys" => {
-                    let table = args
-                        .get("table")
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| anyhow::anyhow!("Missing table"))?;
-                    let db = args
-                        .get("database")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
+                    let (table, db) = self.get_table_and_db(args)?;
                     let conn = self.registry.get_connector(ds)?;
                     let fkeys = conn.get_imported_keys(db, table).await?;
                     Ok(serde_json::to_string_pretty(&fkeys)?)
                 }
                 "get_table_ddl" => {
-                    let table = args
-                        .get("table")
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| anyhow::anyhow!("Missing table"))?;
-                    let db = args
-                        .get("database")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
+                    let (table, db) = self.get_table_and_db(args)?;
                     let conn = self.registry.get_connector(ds)?;
                     let ddl = conn.get_table_ddl(db, table).await?;
                     Ok(ddl)
@@ -668,19 +674,7 @@ impl McpServer {
                     let limit = max_rows.min(self.config.mcp.security.max_rows);
 
                     let conn = self.registry.get_connector(ds)?;
-                    let start = Instant::now();
-                    let res = conn.execute_query(sql, limit).await;
-                    let elapsed = start.elapsed().as_millis() as i64;
-
-                    match &res {
-                        Ok(qr) => {
-                            self.audit(ds, sql, elapsed, qr.row_count, None);
-                        }
-                        Err(e) => {
-                            self.audit(ds, sql, elapsed, 0, Some(e));
-                        }
-                    }
-                    Ok(serde_json::to_string_pretty(&res?)?)
+                    self.execute_and_audit(&conn, ds, sql, limit).await
                 }
                 "explain_query" => {
                     let sql = args
@@ -689,30 +683,10 @@ impl McpServer {
                         .ok_or_else(|| anyhow::anyhow!("Missing parameter 'sql'"))?;
                     let explain_sql = format!("EXPLAIN {}", sql);
                     let conn = self.registry.get_connector(ds)?;
-
-                    let start = Instant::now();
-                    let res = conn.execute_query(&explain_sql, 100).await;
-                    let elapsed = start.elapsed().as_millis() as i64;
-
-                    match &res {
-                        Ok(qr) => {
-                            self.audit(ds, &explain_sql, elapsed, qr.row_count, None);
-                        }
-                        Err(e) => {
-                            self.audit(ds, &explain_sql, elapsed, 0, Some(e));
-                        }
-                    }
-                    Ok(serde_json::to_string_pretty(&res?)?)
+                    self.execute_and_audit(&conn, ds, &explain_sql, 100).await
                 }
                 "count_rows" => {
-                    let table = args
-                        .get("table")
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| anyhow::anyhow!("Missing table"))?;
-                    let db = args
-                        .get("database")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
+                    let (table, db) = self.get_table_and_db(args)?;
                     let where_clause = args
                         .get("where")
                         .and_then(|v| v.as_str())
@@ -722,14 +696,7 @@ impl McpServer {
                     Ok(count.to_string())
                 }
                 "sample_data" => {
-                    let table = args
-                        .get("table")
-                        .and_then(|v| v.as_str())
-                        .ok_or_else(|| anyhow::anyhow!("Missing table"))?;
-                    let db = args
-                        .get("database")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
+                    let (table, db) = self.get_table_and_db(args)?;
                     let limit = args
                         .get("limit")
                         .and_then(|v| v.as_i64())
