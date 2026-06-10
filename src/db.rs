@@ -1,5 +1,4 @@
 #![allow(clippy::collapsible_if)]
-#![allow(clippy::explicit_counter_loop)]
 #![allow(clippy::match_like_matches_macro)]
 
 use anyhow::Result;
@@ -480,8 +479,7 @@ impl BaseConnector {
                     .bind(&db)
                     .bind(table)
                     .fetch_all(&self.pool).await?;
-                let mut seq = 1;
-                for row in rows {
+                for (seq, row) in (1..).zip(rows) {
                     let con_name: String = row.try_get(0)?;
                     let child_col: String = row.try_get(1)?;
                     let parent_table: String = row.try_get(2)?;
@@ -494,7 +492,6 @@ impl BaseConnector {
                     fk.insert("KEY_SEQ".to_string(), json!(seq));
                     fk.insert("FK_NAME".to_string(), json!(con_name));
                     fkeys.push(fk);
-                    seq += 1;
                 }
             }
             "SQLITE" => {
