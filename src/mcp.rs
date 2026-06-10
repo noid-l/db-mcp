@@ -142,11 +142,7 @@ impl McpServer {
             sql
         );
 
-        if let Ok(mut file) = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_file)
-        {
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_file) {
             let _ = file.write_all(log_line.as_bytes());
         } else {
             eprint!("[AUDIT] {}", log_line);
