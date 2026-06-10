@@ -1,0 +1,58 @@
+# dblink-mcp Go 版数据库只读查询 MCP 服务配置文件示例
+mcp:
+  # 安全与流控设置
+  security:
+    queryTimeout: 30 # 查询超时限制 (秒)
+    maxResultSetSizeBytes: 5242880 # 单次结果集大小限制 (字节, 默认 5MB)
+    maxRows: 1000 # 最大返回行数 (未指定时默认使用此值，指定时不能超过此值)
+    allowedPrefixes: # 准入只读 SQL 关键字前缀 (不区分大小写)
+      - select
+      - show
+      - explain
+
+  # 审计配置
+  audit:
+    enabled: true
+    logFile: "./logs/query-audit.log"
+    logResults: false
+
+  # 数据库连接池定义
+  dataSources:
+    # 示例1: SQLite (纯 Go 驱动，免 CGO，极其好用)
+    my-sqlite:
+      type: SQLITE
+      database: "./data/mydb.db" # sqlite 数据库文件路径。如不需要持久化可填 :memory:
+
+    # 示例2: MySQL / MariaDB
+    my-mysql:
+      type: MYSQL
+      host: 127.0.0.1
+      port: 3306
+      database: mydb
+      username: root
+      password: MyPassword123
+      properties:
+        useSSL: "false"
+        serverTimezone: "Asia/Shanghai"
+
+    # 示例3: PostgreSQL
+    my-pgsql:
+      type: POSTGRESQL
+      host: 127.0.0.1
+      port: 5432
+      database: mydb
+      username: postgres
+      password: MyPassword456
+      properties:
+        sslmode: "disable"
+
+    # 示例4: SQL Server
+    my-mssql:
+      type: SQLSERVER
+      host: 127.0.0.1
+      port: 1433
+      database: mydb
+      username: sa
+      password: MyPassword789
+      properties:
+        encrypt: "disable"
