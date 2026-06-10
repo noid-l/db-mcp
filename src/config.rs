@@ -1,15 +1,17 @@
+#![allow(clippy::collapsible_if)]
+
 use regex::Regex;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct Config {
     pub mcp: McpConfig,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct McpConfig {
     #[serde(rename = "dataSources")]
     pub data_sources: HashMap<String, DataSourceConfig>,
@@ -49,6 +51,7 @@ pub struct AuditConfig {
     pub enabled: bool,
     #[serde(rename = "logFile")]
     pub log_file: String,
+    #[allow(dead_code)]
     #[serde(rename = "logResults")]
     pub log_results: Option<bool>,
 }
@@ -79,23 +82,6 @@ impl Default for AuditConfig {
     }
 }
 
-impl Default for McpConfig {
-    fn default() -> Self {
-        Self {
-            data_sources: HashMap::new(),
-            security: SecurityConfig::default(),
-            audit: AuditConfig::default(),
-        }
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            mcp: McpConfig::default(),
-        }
-    }
-}
 
 pub fn load_config<P: AsRef<Path>>(path: P) -> Result<Config, Box<dyn std::error::Error>> {
     let content = fs::read_to_string(path)?;

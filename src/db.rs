@@ -1,3 +1,7 @@
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::explicit_counter_loop)]
+#![allow(clippy::match_like_matches_macro)]
+
 use anyhow::Result;
 use serde::Serialize;
 use serde_json::{Value, json};

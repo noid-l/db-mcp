@@ -1,3 +1,5 @@
+#![allow(clippy::collapsible_if)]
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -142,7 +144,6 @@ impl McpServer {
 
         if let Ok(mut file) = OpenOptions::new()
             .create(true)
-            .write(true)
             .append(true)
             .open(log_file)
         {
@@ -787,8 +788,7 @@ impl McpServer {
         }
 
         // 匹配 db://{dataSource}/tables/{table}
-        if uri.starts_with("db://") {
-            let rem = &uri[5..];
+        if let Some(rem) = uri.strip_prefix("db://") {
             let parts: Vec<&str> = rem.split('/').collect();
             if parts.len() == 3 && parts[1] == "tables" {
                 let ds = parts[0];
